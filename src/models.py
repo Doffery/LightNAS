@@ -14,6 +14,9 @@ from src.image_ops import global_avg_pool
 from src.utils import count_model_params
 from src.utils import get_train_ops
 
+import utils
+
+logger = utils.logger
 
 class Model(object):
     def __init__(self,
@@ -70,6 +73,7 @@ class Model(object):
         with tf.device("/cpu:0"):
             # training data
             self.num_train_examples = np.shape(images["train"])[0]
+            logger.info(self.num_train_examples)
             self.num_train_batches = (
                 self.num_train_examples + self.batch_size - 1) // self.batch_size
             x_train, y_train = tf.train.shuffle_batch(
@@ -83,6 +87,9 @@ class Model(object):
                 allow_smaller_final_batch=True,
                 )
             self.lr_dec_every = lr_dec_every * self.num_train_batches
+
+            logger.info(self.batch_size)
+            logger.info("Image Train Set Shape {0}".format(x_train.shape)) 
 
             def _pre_process(x):
                 x = tf.pad(x, [[4, 4], [4, 4], [0, 0]])
@@ -104,6 +111,8 @@ class Model(object):
                 return x
             self.x_train = tf.map_fn(_pre_process, x_train, back_prop=False)
             self.y_train = y_train
+
+            logger.info("Image Train Set Shape {0}".format(x_train.shape)) 
 
             # valid data
             self.x_valid, self.y_valid = None, None

@@ -8,8 +8,9 @@ nohup python src/main.py \
   --reset_output_dir \
   --data_path="data/cifar10" \
   --output_dir="outputs" \
-  --batch_size=160 \
-  --num_epochs=150 \
+  --summaries_dir="log" \
+  --batch_size=100 \
+  --num_epochs=50 \
   --log_every=50 \
   --eval_every_epochs=1 \
   --child_use_aux_heads \

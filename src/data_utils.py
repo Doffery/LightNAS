@@ -5,6 +5,9 @@ import pickle
 import numpy as np
 import tensorflow as tf
 
+import utils
+
+logger = utils.logger
 
 def _read_data(data_path, train_files):
   """Reads CIFAR-10 format data. Always returns NHWC format.
@@ -27,6 +30,9 @@ def _read_data(data_path, train_files):
   labels = np.concatenate(labels, axis=0)
   images = np.reshape(images, [-1, 3, 32, 32])
   images = np.transpose(images, [0, 2, 3, 1])
+  
+  # logger.info("Image exp:")
+  # logger.info(images[0])
 
   return images, labels
 

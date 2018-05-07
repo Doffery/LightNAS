@@ -18,6 +18,7 @@ from utils import DEFINE_string
 from utils import print_user_flags
 from path_controller import PathController
 from path_generator import PathGenerator
+from dag_executor import DagExecutor
 import data_utils
 from data_utils import read_data
 
@@ -25,12 +26,13 @@ flags = tf.app.flags
 FLAGS = flags.FLAGS
 os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
 
-logger = utils.get_logger()
+logger = utils.logger
 
 
 DEFINE_boolean("reset_output_dir", False, "Delete output_dir if exists.")
 DEFINE_string("data_path", "", "")
 DEFINE_string("output_dir", "", "")
+DEFINE_string("summaries_dir", "", "")
 DEFINE_string("data_format", "NHWC", "'NHWC' or 'NCWH'")
 DEFINE_string("search_for", None, "Must be [macro|micro]")
 
@@ -85,7 +87,8 @@ def get_ops(images, labels):
  
     # if FLAGS.search_for == "micro":
     # ControllerClass = PathController
-    ChildClass = PathGenerator
+    # ChildClass = PathGenerator
+    ChildClass = DagExecutor
     # else:
     #  ControllerClass = GeneralController
     #  ChildClass = GeneralChild
@@ -135,9 +138,9 @@ def get_ops(images, labels):
       "grad_norm": child_model.grad_norm,
       "train_acc": child_model.train_acc,
       "optimizer": child_model.optimizer,
-      "num_train_batches": child_model.num_train_batches,
       "valid_rl_acc": child_model.valid_rl_acc,
-      "path_arc": child_model.path_arc,
+      # "path_arc": child_model.path_arc,
+      "dag_arc": child_model.dag_arc,
       "num_train_batches": child_model.num_train_batches,
       "eval_every": child_model.num_train_batches * FLAGS.eval_every_epochs,
       "eval_func": child_model.eval_once,
@@ -160,6 +163,8 @@ def train():
         images, labels = read_data(FLAGS.data_path)
     else:
         images, labels = read_data(FLAGS.data_path, num_valids=0)
+
+    logger.info("Original Image Shape: {0}".format(images['train'].shape))
  
     g = tf.Graph()
     with g.as_default():
@@ -172,7 +177,8 @@ def train():
                 k_init_selection_num=FLAGS.k_init_selection_num,
                 k_best_selection_num=FLAGS.k_best_selection_num,
                 max_generation=FLAGS.max_generation)
-        pc.build_path_pool_out_tensor(child_ops)
+        # pc.build_path_pool_out_tensor(child_ops)
+        pc.build_path_pool_full_arc(child_ops)
         # pc.build_path_pool(10)
 
 

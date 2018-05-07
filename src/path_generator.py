@@ -21,7 +21,7 @@ from src.utils import get_train_ops
 from src.common_ops import create_weight
 
 
-logger = utils.get_logger()
+logger = utils.logger
 
 
 class PathGenerator(Model):
@@ -714,11 +714,11 @@ class PathGenerator(Model):
                     return self._enas_cell(prev_layer, cell_id, prev_id, 
                                            arc[cell_id], out_filters), cell_id
 
-                logger.info(prev_layer)
-                logger.info(prev_id)
+                # logger.info(prev_layer)
+                # logger.info(prev_id)
                 layer, layer_id = tf.cond(tf.equal(arc[cell_id], -1), _use_prev, _use_new)
-                logger.info(layer)
-                logger.info(layer_id)
+                # logger.info(layer)
+                # logger.info(layer_id)
                 # x = prev_layers[x_id, :, :, :, :]
                 # x = self._enas_cell(x, cell_id, x_id, x_op, out_filters)
                 # x_used = tf.one_hot(x_id, depth=self.num_cells + 2, dtype=tf.int32)
@@ -838,6 +838,8 @@ class PathGenerator(Model):
             self.valid_acc = tf.to_int32(self.valid_acc)
             self.valid_acc = tf.reduce_sum(self.valid_acc)
 
+            tf.summary.scalar('validation acc', self.valid_acc)
+
     # override
     def _build_test(self):
         logger.info("-" * 80)
@@ -848,6 +850,8 @@ class PathGenerator(Model):
         self.test_acc = tf.equal(self.test_preds, self.y_test)
         self.test_acc = tf.to_int32(self.test_acc)
         self.test_acc = tf.reduce_sum(self.test_acc)
+
+        tf.summary.scalar('test acc', self.test_acc)
 
     # override
     def build_valid_rl(self, shuffle=False):
