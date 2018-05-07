@@ -599,8 +599,8 @@ class DagExecutor(Model):
 
         link_layers = []
         num_used_layers = self.num_cells-tf.size(tf.where(tf.equal(prev_idxs, 0)))
-        at_least_one = tf.Assert(tf.greater(num_used_layers, 0), [prev_idxs],
-                                 'No previous layer chosen!!!')
+        at_least_one = tf.Assert(tf.greater(num_used_layers, 0), [prev_idxs,
+                                 'No previous layer chosen!!!'], 100)
         for i in range(curr_cell+1):
             slayer = tf.cond(tf.equal(prev_idxs[i], 0), _not_selected,
                              lambda: _seleted(prev_layers[i]))
@@ -661,12 +661,12 @@ class DagExecutor(Model):
                                                  data_format=self.data_format)
                 x = batch_norm(x, is_training=True, data_format=self.data_format)
 
-        out = [# x,  # This is for default useless linkage
-            self._enas_dag_conv(x, curr_cell, 3, out_filters),
-            self._enas_dag_conv(x, curr_cell, 5, out_filters),
-            avg_pool,
-            max_pool,
-            x,
+        out = [ x,  # This is for default useless linkage
+                self._enas_dag_conv(x, curr_cell, 3, out_filters),
+                self._enas_dag_conv(x, curr_cell, 5, out_filters),
+                avg_pool,
+                max_pool,
+                x,
         ]
 
         out = tf.stack(out, axis=0)

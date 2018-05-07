@@ -64,6 +64,10 @@ def count_model_params(tf_variables):
 
 
 def find_top_k_ind(data, k):
+    """
+    Return:
+        a list of [index, acc] with top acc
+    """
     ind_data = list(enumerate(data))
     return heapq.nlargest(k, ind_data, key=itemgetter(1))
 

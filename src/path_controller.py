@@ -59,6 +59,7 @@ class PathController:
                 pre_op_idx = i+1
         return dag
 
+
     def _init_pool_as_paths(self):
         # path_pool = np.where(True, path_pool, -1)
         def _sample_path(length, num):
@@ -70,7 +71,7 @@ class PathController:
                 sample_ind = random.sample(range(self.num_cells), length)
                 path = np.zeros(self.num_cells, dtype=np.int32)
                 for ind in sample_ind:
-                    path[ind] = random.randint(0, self.opt_num)+1
+                    path[ind] = random.randint(0, self.opt_num)
                 path_str = np.array2string(path)
                 if path_str not in sample_dict and self._check_path(path):
                     sample_dict[path_str] = path
@@ -80,13 +81,16 @@ class PathController:
         dag_pool = []
         path_pool = []
         remain = self.path_pool_size
-        remain_each_length = int(remain / self.num_cells)
         for i in range(self.num_cells):
             length = i+1
+            remain_each_length = remain // (self.num_cells-i)
             paths = _sample_path(length, remain_each_length)
+            logger.info('Sampled {0} paths, length: {1}'.format(len(paths), length))
             for path in paths:
+                logger.info(path)
                 path_pool.append(path)
                 dag_pool.append(self._path2dag(path))
+                remain -= 1
         # path_pool = [  [1, 0, 0, 0, 0, 1, 0,
         #                 2, 0, 0, 0, 0, 0, 0,
         #                 0, 1, 0, 0, 0, 3, 0,
@@ -145,7 +149,6 @@ class PathController:
         logger.info("-" * 80)
         logger.info("Starting session")
         config = tf.ConfigProto(allow_soft_placement=True)
-        logger.info("Start init the pool and cal valid_acc")
         merged = tf.summary.merge_all()
 
 
@@ -163,6 +166,7 @@ class PathController:
             # train each path, get validation acc
             # get the initial population
             iteration = 0
+            logger.info("Start init the pool and cal valid_acc")
             while True:
                 for i in range(self.path_pool_size):
                     iteration += 1
@@ -219,11 +223,11 @@ class PathController:
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     path_pool_acc[i] = valid_acc
-                    logger.info("path_acc {0}: {1}".format(i, valid_acc))
 
                     logger.info("Epoch {}: Eval".format(epoch))
-                    if FLAGS.child_fixed_arc is None:
-                        child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
+                    logger.info("path_acc {0}: {1}".format(i, valid_acc))
+                    # if FLAGS.child_fixed_arc is None:
+                    #     child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
                     child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
 
                 if epoch >= FLAGS.num_epochs:
@@ -231,39 +235,62 @@ class PathController:
             logger.info("Finish init the path pool")
             train_writer.close()
 
+            def _is_new_path(path):
+                return False
+
             # start evolving
-            # select top-k
-            top_k_ind_acc = utils.find_top_k_ind(path_pool_acc,
-                                                 self.k_init_selection)
-            seeds = [x for x, _ in top_k_ind_acc]
-            candidate_paths = []
+            evolve_iter = 0
+            while evolve_iter < self.max_generation:
+                evolve_iter += 1
+                # select top-k
+                top_k_ind_acc = utils.find_top_k_ind(path_pool_acc,
+                                                     self.k_init_selection)
+                seeds = [x for x, _ in top_k_ind_acc]
+                candidate_paths = []
 
-            # apply mutation
-            for ind in seeds:
-                tmp_path = path_pool[ind]
-                for i in range(self.num_cells):
-                    tmp = tmp_path[i]
-                    tmp_path[i] = np.random.randint(-1, self.opt_num)
-                    if self._check_path(tmp_path):
-                        candidate_paths.append(tmp_path[:])
-                    tmp_path[i] = tmp
+                # apply mutation
+                for ind in seeds:
+                    tmp_path = path_pool[ind]
+                    for i in range(self.num_cells):
+                        tmp = tmp_path[i]
+                        tmp_path[i] = np.random.randint(-1, self.opt_num)
+                        if self._check_path(tmp_path) and _is_new_path(tmp_path):
+                            candidate_paths.append(tmp_path[:])
+                        tmp_path[i] = tmp
 
-            # apply crossover
-            # for ind1, acc1 in top_k_ind_acc:
-            #     tmp_path1 = path_pool[ind1]
-            #     for ind2, acc2 in top_k_ind_acc:
-            #         tmp_path2 = path_pool[ind2]
+                # apply crossover
+                # for ind1, acc1 in top_k_ind_acc:
+                #     tmp_path1 = path_pool[ind1]
+                #     for ind2, acc2 in top_k_ind_acc:
+                #         tmp_path2 = path_pool[ind2]
 
-            # predict and select best k
+                # predict and select best k
+                candidate_accs = []
+                for i, cpath in enumerate(candidate_paths):
+                    cdag = self._path2dag(cpath)
+                    feed_dict = {child_ops["dag_arc"]: cdag}
+                    valid_acc = sess.run(child_ops["valid_rl_acc"],
+                                         feed_dict=feed_dict)
+                    logger.info('Candidate {0} acc: '.format(valid_acc))
+                    candidate_accs.append(valid_acc)
 
-            candidate_accs = []
-            for i, cpath in enumerate(candidate_paths):
-                cdag = self._path2dag(cpath)
-                feed_dict = {child_ops["dag_arc"]: cdag}
-                valid_acc = sess.run(child_ops["valid_rl_acc"],
-                                     feed_dict=feed_dict)
-                logger.info('Candidate {0} acc: '.format(valid_acc))
-                candidate_accs.append(valid_acc)
+                top_k_candidates = utils.find_top_k_ind(candidate_accs,
+                                                        self.k_best_selection)
+
+                # replace the worse with candidates
+                for tk_ind, tk_acc in top_k_candidates:
+                    path_pool.append(candidate_paths[tk_ind])
+                    path_pool_acc.append(tk_acc)
+                bad_k_paths = utils.find_rtop_k_ind(path_pool_acc,
+                                                    self.k_best_selection)
+                del_inx = [ind for ind, _ in bad_k_paths]
+                del_inx.sort(reverse=True)
+                for d_ind in del_inx:
+                    del path_pool[d_ind]
+                    del path_pool_acc[d_ind]
+
+
+            # build dags from paths
 
 
     def build_path_pool_out_tensor(self, child_ops):

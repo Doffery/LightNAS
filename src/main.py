@@ -68,7 +68,7 @@ DEFINE_boolean("child_lr_cosine", False, "Use cosine lr schedule")
 
 DEFINE_boolean("controller_search_whole_channels", False, "")
 DEFINE_integer("opt_num", 5, "num of ops can be selected")
-DEFINE_integer("path_pool_size", 2, "")
+DEFINE_integer("path_pool_size", 10, "")
 DEFINE_integer("k_init_selection_num", 5, "")
 DEFINE_integer("k_best_selection_num", 5, "")
 DEFINE_integer("max_generation", 10, "")
