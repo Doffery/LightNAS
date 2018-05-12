@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '1,2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 logger = utils.logger
 
@@ -37,6 +37,8 @@ DEFINE_string("data_format", "NHWC", "'NHWC' or 'NCWH'")
 DEFINE_string("search_for", None, "Must be [macro|micro]")
 
 DEFINE_integer("batch_size", 32, "")
+
+DEFINE_integer("num_epochs_evolve", 3, "")
 
 DEFINE_integer("num_epochs", 300, "")
 DEFINE_integer("child_lr_dec_every", 100, "")
@@ -74,7 +76,8 @@ DEFINE_integer("k_best_selection_num", 5, "")
 DEFINE_integer("max_generation", 10, "")
 
 DEFINE_integer("log_every", 50, "How many steps to log")
-DEFINE_integer("eval_every_epochs", 1, "How many epochs to eval")
+DEFINE_integer("eval_every", 23, "How many steps to log")
+# DEFINE_integer("eval_every_epochs", 1, "How many epochs to eval")
 
 def get_ops(images, labels):
     """
@@ -142,7 +145,7 @@ def get_ops(images, labels):
       # "path_arc": child_model.path_arc,
       "dag_arc": child_model.dag_arc,
       "num_train_batches": child_model.num_train_batches,
-      "eval_every": child_model.num_train_batches * FLAGS.eval_every_epochs,
+      # "eval_every": child_model.num_train_batches * FLAGS.eval_every_epochs,
       "eval_func": child_model.eval_once,
     }
  

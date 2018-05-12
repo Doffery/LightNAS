@@ -81,7 +81,7 @@ class Model(object):
                 batch_size=self.batch_size,
                 capacity=50000,
                 enqueue_many=True,
-                min_after_dequeue=0,
+                min_after_dequeue=100,
                 num_threads=16,
                 seed=self.seed,
                 allow_smaller_final_batch=True,

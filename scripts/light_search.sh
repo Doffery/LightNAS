@@ -2,16 +2,18 @@
 
 export PYTHONPATH="$(pwd)"
 
-nohup python src/main.py \
+python src/main.py \
   --data_format="NCHW" \
   --search_for="micro" \
   --reset_output_dir \
   --data_path="data/cifar10" \
   --output_dir="outputs" \
   --summaries_dir="log" \
-  --batch_size=100 \
-  --num_epochs=50 \
+  --batch_size=160 \
+  --num_epochs=5 \
+  --num_epochs_evolve=3 \
   --log_every=50 \
+  --eval_every=23 \
   --eval_every_epochs=1 \
   --child_use_aux_heads \
   --child_num_layers=6 \
@@ -36,5 +38,5 @@ nohup python src/main.py \
   --controller_lr=0.0035 \
   --controller_tanh_constant=1.10 \
   --controller_op_tanh_reduce=2.5 \
-  "$@" &
+  "$@"
 

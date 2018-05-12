@@ -297,6 +297,7 @@ class DagExecutor(Model):
             with tf.variable_scope("stem_conv"):
                 # w = create_weight("w", [3, 3, 3, self.out_filters * 3])
                 w = create_weight("w", [3, 3, 3, self.out_filters])
+                logger.info("Verify reuse Weight w {0}".format(w.name))
                 x = tf.nn.conv2d(
                     images, w, [1, 1, 1, 1], "SAME", data_format=self.data_format)
                 x = batch_norm(x, is_training, data_format=self.data_format)

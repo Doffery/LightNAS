@@ -71,7 +71,7 @@ class PathController:
                 sample_ind = random.sample(range(self.num_cells), length)
                 path = np.zeros(self.num_cells, dtype=np.int32)
                 for ind in sample_ind:
-                    path[ind] = random.randint(0, self.opt_num)
+                    path[ind] = random.randint(1, self.opt_num)
                 path_str = np.array2string(path)
                 if path_str not in sample_dict and self._check_path(path):
                     sample_dict[path_str] = path
@@ -81,7 +81,7 @@ class PathController:
         dag_pool = []
         path_pool = []
         remain = self.path_pool_size
-        for i in range(self.num_cells):
+        for i in range(1, self.num_cells):
             length = i+1
             remain_each_length = remain // (self.num_cells-i)
             paths = _sample_path(length, remain_each_length)
@@ -197,7 +197,6 @@ class PathController:
                                 ]
                         loss, lr, gn, tr_acc, _ = sess.run(run_ops,
                                 feed_dict=feed_dict)
-                        break  ################################################
 
                     global_step = sess.run(child_ops["global_step"])
 
@@ -208,6 +207,7 @@ class PathController:
                     epoch = actual_step // child_ops["num_train_batches"]
                     curr_time = time.time()
                     if global_step % FLAGS.log_every == 0:
+                        logger.info("Global Step at {}".format(global_step))
                         log_string = ""
                         log_string += "epoch={:<6d}".format(epoch)
                         log_string += "ch_step={:<6d}".format(global_step)
@@ -220,43 +220,49 @@ class PathController:
                             float(curr_time - start_time) / 60)
                         logger.info(log_string)
 
-                    valid_acc = sess.run(child_ops["valid_rl_acc"],
-                                         feed_dict=feed_dict)
-                    path_pool_acc[i] = valid_acc
-
-                    logger.info("Epoch {}: Eval".format(epoch))
-                    logger.info("path_acc {0}: {1}".format(i, valid_acc))
-                    # if FLAGS.child_fixed_arc is None:
-                    #     child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
-                    child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
+                        if FLAGS.child_fixed_arc is None:
+                            child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
+                        child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
 
                 if epoch >= FLAGS.num_epochs:
                     break
             logger.info("Finish init the path pool")
-            train_writer.close()
+
+            logger.info("Eval after initialization")
+            for i in range(self.path_pool_size):
+                valid_acc = sess.run(child_ops["valid_rl_acc"],
+                                     feed_dict=feed_dict)
+                path_pool_acc[i] = valid_acc
+
+                logger.info("path_acc {0}: {1}".format(i, valid_acc))
 
             def _is_new_path(path):
-                return False
+                return True
 
             # start evolving
+            logger.info("Start evolving...")
             evolve_iter = 0
             while evolve_iter < self.max_generation:
                 evolve_iter += 1
                 # select top-k
+                logger.info("Evolving {0}:".format(evolve_iter))
+                logger.info("Pathes: {0}".format(list(enumerate(path_pool))))
+                logger.info("Pathes acc: {0}".format(list(enumerate(path_pool_acc))))
                 top_k_ind_acc = utils.find_top_k_ind(path_pool_acc,
                                                      self.k_init_selection)
+                logger.info("Select top K seeds: {0}".format(top_k_ind_acc))
                 seeds = [x for x, _ in top_k_ind_acc]
                 candidate_paths = []
 
                 # apply mutation
                 for ind in seeds:
-                    tmp_path = path_pool[ind]
                     for i in range(self.num_cells):
-                        tmp = tmp_path[i]
-                        tmp_path[i] = np.random.randint(-1, self.opt_num)
+                        tmp_path = path_pool[ind][:]
+                        # tmp = tmp_path[i]
+                        tmp_path[i] = np.random.randint(0, self.opt_num+1)
                         if self._check_path(tmp_path) and _is_new_path(tmp_path):
-                            candidate_paths.append(tmp_path[:])
-                        tmp_path[i] = tmp
+                            candidate_paths.append(tmp_path)
+                        # tmp_path[i] = tmp
 
                 # apply crossover
                 # for ind1, acc1 in top_k_ind_acc:
@@ -265,32 +271,44 @@ class PathController:
                 #         tmp_path2 = path_pool[ind2]
 
                 # predict and select best k
+                logger.info("Candidate Paths: {0}".format(candidate_paths))
                 candidate_accs = []
                 for i, cpath in enumerate(candidate_paths):
                     cdag = self._path2dag(cpath)
                     feed_dict = {child_ops["dag_arc"]: cdag}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
-                    logger.info('Candidate {0} acc: '.format(valid_acc))
+                    logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
                     candidate_accs.append(valid_acc)
 
                 top_k_candidates = utils.find_top_k_ind(candidate_accs,
                                                         self.k_best_selection)
+                logger.info("Top K Candidates: {0}".format(top_k_candidates))
 
                 # replace the worse with candidates
                 for tk_ind, tk_acc in top_k_candidates:
-                    path_pool.append(candidate_paths[tk_ind])
-                    path_pool_acc.append(tk_acc)
+                    path_pool = np.append(path_pool, [candidate_paths[tk_ind]], axis=0)
+                    path_pool_acc = np.append(path_pool_acc, [tk_acc])
                 bad_k_paths = utils.find_rtop_k_ind(path_pool_acc,
                                                     self.k_best_selection)
+                logger.info("Removing: {0}".format(bad_k_paths))
                 del_inx = [ind for ind, _ in bad_k_paths]
-                del_inx.sort(reverse=True)
-                for d_ind in del_inx:
-                    del path_pool[d_ind]
-                    del path_pool_acc[d_ind]
+                # del_inx.sort(reverse=True)
+                # for d_ind in del_inx:
+                #     del path_pool[d_ind]
+                #     del path_pool_acc[d_ind]
+                tmp_path_pool = []
+                tmp_path_pool_acc = []
+                for ind in range(self.path_pool_size+self.k_best_selection):
+                    if ind not in del_inx:
+                        tmp_path_pool.append(path_pool[ind])
+                        tmp_path_pool_acc.append(path_pool_acc[ind])
+                path_pool = np.array(tmp_path_pool)
+                path_pool_acc = np.array(tmp_path_pool_acc)
 
 
             # build dags from paths
+            train_writer.close()
 
 
     def build_path_pool_out_tensor(self, child_ops):
