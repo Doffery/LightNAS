@@ -41,7 +41,7 @@ class PathController:
         return tf.random_normal([1, 3], mean=-1, stddev=4)
 
     def _check_path(self, path):
-        return True
+        return path.tolist().count(0) < self.num_cells-1
 
     def _path2dag(self, path):
         dag = np.zeros((self.num_cells*(self.num_cells+2)), dtype=np.int32)
@@ -165,78 +165,85 @@ class PathController:
             start_time = time.time()
             # train each path, get validation acc
             # get the initial population
-            iteration = 0
+            self.iteration = 0
+
+            def _train_it(t_epoch_num):
+                while True:
+                    for i in range(self.path_pool_size):
+                        feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
+                        if self.iteration % 100 == 1:
+                            run_ops = [
+                                    merged,
+                                    child_ops["loss"],
+                                    child_ops["lr"],
+                                    child_ops["grad_norm"],
+                                    child_ops["train_acc"],
+                                    child_ops["train_op"],
+                                    ]
+                            summary, loss, lr, gn, tr_acc, _ = sess.run(run_ops,
+                                    feed_dict=feed_dict, options=run_options,
+                                    run_metadata=run_metadata)
+                            train_writer.add_run_metadata(run_metadata,
+                                                  'step{0}'.format(self.iteration))
+                            train_writer.add_summary(summary, self.iteration)
+                            logger.info("Finish t_step {0}".format(self.iteration))
+                        else:
+                            run_ops = [
+                                    child_ops["loss"],
+                                    child_ops["lr"],
+                                    child_ops["grad_norm"],
+                                    child_ops["train_acc"],
+                                    child_ops["train_op"],
+                                    ]
+                            loss, lr, gn, tr_acc, _ = sess.run(run_ops,
+                                    feed_dict=feed_dict)
+
+                        global_step = sess.run(child_ops["global_step"])
+                        self.iteration = global_step
+
+                        if FLAGS.child_sync_replicas:
+                            actual_step = global_step * FLAGS.num_aggregate
+                        else:
+                            actual_step = global_step
+                        epoch = actual_step // child_ops["num_train_batches"]
+                        curr_time = time.time()
+                        if global_step % FLAGS.log_every == 0:
+                            logger.info("Global Step at {}".format(global_step))
+                            log_string = ""
+                            log_string += "epoch={:<6d}".format(epoch)
+                            log_string += "ch_step={:<6d}".format(global_step)
+                            log_string += " loss={:<8.6f}".format(loss)
+                            log_string += " lr={:<8.4f}".format(lr)
+                            log_string += " |g|={:<8.4f}".format(gn)
+                            log_string += " tr_acc={:<3d}/{:>3d}".format(
+                                tr_acc, FLAGS.batch_size)
+                            log_string += " mins={:<10.2f}".format(
+                                float(curr_time - start_time) / 60)
+                            logger.info(log_string)
+
+                            if FLAGS.child_fixed_arc is None:
+                                child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
+                            child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
+
+                    if epoch >= t_epoch_num:
+                        for i in range(self.path_pool_size):
+                            feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
+                            valid_acc = sess.run(child_ops["valid_rl_acc"],
+                                                 feed_dict=feed_dict)
+                            path_pool_acc[i] = valid_acc
+
+                            logger.info("path_acc {0}: {1}".format(i, valid_acc))
+                        break
+
             logger.info("Start init the pool and cal valid_acc")
-            while True:
-                for i in range(self.path_pool_size):
-                    iteration += 1
-                    feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
-                    if iteration % 100 == 1:
-                        run_ops = [
-                                merged,
-                                child_ops["loss"],
-                                child_ops["lr"],
-                                child_ops["grad_norm"],
-                                child_ops["train_acc"],
-                                child_ops["train_op"],
-                                ]
-                        summary, loss, lr, gn, tr_acc, _ = sess.run(run_ops,
-                                feed_dict=feed_dict, options=run_options,
-                                run_metadata=run_metadata)
-                        train_writer.add_run_metadata(run_metadata,
-                                                      'step{0}'.format(iteration))
-                        train_writer.add_summary(summary, iteration)
-                        logger.info("Finish train step {0}".format(iteration))
-                    else:
-                        run_ops = [
-                                child_ops["loss"],
-                                child_ops["lr"],
-                                child_ops["grad_norm"],
-                                child_ops["train_acc"],
-                                child_ops["train_op"],
-                                ]
-                        loss, lr, gn, tr_acc, _ = sess.run(run_ops,
-                                feed_dict=feed_dict)
-
-                    global_step = sess.run(child_ops["global_step"])
-
-                    if FLAGS.child_sync_replicas:
-                        actual_step = global_step * FLAGS.num_aggregate
-                    else:
-                        actual_step = global_step
-                    epoch = actual_step // child_ops["num_train_batches"]
-                    curr_time = time.time()
-                    if global_step % FLAGS.log_every == 0:
-                        logger.info("Global Step at {}".format(global_step))
-                        log_string = ""
-                        log_string += "epoch={:<6d}".format(epoch)
-                        log_string += "ch_step={:<6d}".format(global_step)
-                        log_string += " loss={:<8.6f}".format(loss)
-                        log_string += " lr={:<8.4f}".format(lr)
-                        log_string += " |g|={:<8.4f}".format(gn)
-                        log_string += " tr_acc={:<3d}/{:>3d}".format(
-                            tr_acc, FLAGS.batch_size)
-                        log_string += " mins={:<10.2f}".format(
-                            float(curr_time - start_time) / 60)
-                        logger.info(log_string)
-
-                        if FLAGS.child_fixed_arc is None:
-                            child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
-                        child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
-
-                if epoch >= FLAGS.num_epochs:
-                    break
+            _train_it(FLAGS.num_epochs)
             logger.info("Finish init the path pool")
 
-            logger.info("Eval after initialization")
-            for i in range(self.path_pool_size):
-                valid_acc = sess.run(child_ops["valid_rl_acc"],
-                                     feed_dict=feed_dict)
-                path_pool_acc[i] = valid_acc
-
-                logger.info("path_acc {0}: {1}".format(i, valid_acc))
 
             def _is_new_path(path):
+                for p in path_pool:
+                    if (p == path).all():
+                        return False
                 return True
 
             # start evolving
@@ -257,10 +264,11 @@ class PathController:
                 # apply mutation
                 for ind in seeds:
                     for i in range(self.num_cells):
-                        tmp_path = path_pool[ind][:]
+                        tmp_path = np.copy(path_pool[ind])
                         # tmp = tmp_path[i]
                         tmp_path[i] = np.random.randint(0, self.opt_num+1)
-                        if self._check_path(tmp_path) and _is_new_path(tmp_path):
+                        if self._check_path(tmp_path) and \
+                                _is_new_path(tmp_path):
                             candidate_paths.append(tmp_path)
                         # tmp_path[i] = tmp
 
@@ -290,7 +298,8 @@ class PathController:
                     path_pool = np.append(path_pool, [candidate_paths[tk_ind]], axis=0)
                     path_pool_acc = np.append(path_pool_acc, [tk_acc])
                 bad_k_paths = utils.find_rtop_k_ind(path_pool_acc,
-                                                    self.k_best_selection)
+                                                    len(top_k_candidates))
+                                                    # self.k_best_selection)
                 logger.info("Removing: {0}".format(bad_k_paths))
                 del_inx = [ind for ind, _ in bad_k_paths]
                 # del_inx.sort(reverse=True)
@@ -298,13 +307,20 @@ class PathController:
                 #     del path_pool[d_ind]
                 #     del path_pool_acc[d_ind]
                 tmp_path_pool = []
+                tmp_dag_pool = []
                 tmp_path_pool_acc = []
-                for ind in range(self.path_pool_size+self.k_best_selection):
+                for ind in range(len(path_pool)):
                     if ind not in del_inx:
                         tmp_path_pool.append(path_pool[ind])
+                        tmp_dag_pool.append(self._path2dag(path_pool[ind]))
                         tmp_path_pool_acc.append(path_pool_acc[ind])
                 path_pool = np.array(tmp_path_pool)
+                dag_pool = np.array(tmp_dag_pool)
                 path_pool_acc = np.array(tmp_path_pool_acc)
+
+                logger.info("Train evolving iteration {}:".format(evolve_iter))
+                _train_it(FLAGS.num_epochs_evolve)
+                logger.info("Finish evolving iteration {}:".format(evolve_iter))
 
 
             # build dags from paths

@@ -10,11 +10,12 @@ python src/main.py \
   --output_dir="outputs" \
   --summaries_dir="log" \
   --batch_size=160 \
-  --num_epochs=5 \
+  --num_epochs=3 \
   --num_epochs_evolve=3 \
   --log_every=50 \
   --eval_every=23 \
   --eval_every_epochs=1 \
+  --max_generation=30 \
   --child_use_aux_heads \
   --child_num_layers=6 \
   --child_out_filters=20 \
