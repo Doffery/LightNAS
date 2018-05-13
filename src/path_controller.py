@@ -166,8 +166,10 @@ class PathController:
             # train each path, get validation acc
             # get the initial population
             self.iteration = 0
+            self.epoch = 0
 
-            def _train_it(t_epoch_num):
+            def _train_it(extra_epoch_num):
+                t_epoch_num = self.epoch + extra_epoch_num
                 while True:
                     for i in range(self.path_pool_size):
                         feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
@@ -205,12 +207,12 @@ class PathController:
                             actual_step = global_step * FLAGS.num_aggregate
                         else:
                             actual_step = global_step
-                        epoch = actual_step // child_ops["num_train_batches"]
+                        self.epoch = actual_step // child_ops["num_train_batches"]
                         curr_time = time.time()
                         if global_step % FLAGS.log_every == 0:
                             logger.info("Global Step at {}".format(global_step))
                             log_string = ""
-                            log_string += "epoch={:<6d}".format(epoch)
+                            log_string += "epoch={:<6d}".format(self.epoch)
                             log_string += "ch_step={:<6d}".format(global_step)
                             log_string += " loss={:<8.6f}".format(loss)
                             log_string += " lr={:<8.4f}".format(lr)
@@ -225,7 +227,7 @@ class PathController:
                                 child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
                             child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
 
-                    if epoch >= t_epoch_num:
+                    if self.epoch >= t_epoch_num:
                         for i in range(self.path_pool_size):
                             feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
                             valid_acc = sess.run(child_ops["valid_rl_acc"],
@@ -324,6 +326,40 @@ class PathController:
 
 
             # build dags from paths
+
+        # path_pool = [  [1, 0, 0, 0, 0, 1, 0,
+        #                 2, 0, 0, 0, 0, 0, 0,
+        #                 0, 1, 0, 0, 0, 3, 0,
+        #                 2, 0, 0, 0, 0, 0, 0,
+        #                 0, 0, 0, 1, 0, 2, 1, ],
+        #                [1, 0, 0, 0, 0, 0, 0,
+        #                 2, 0, 0, 0, 0, 0, 0,
+        #                 0, 1, 0, 0, 0, 1, 0,
+        #                 2, 0, 0, 0, 0, 0, 0,
+        #                 0, 0, 0, 1, 0, 2, 1,
+        #                 ]]
+            def _merge_dag(da, db):
+                d2a = np.reshape(da, (self.num_cells, (self.num_cells+2)))
+                d2b = np.reshape(db, (self.num_cells, (self.num_cells+2)))
+                d2c = np.zeros((self.num_cells, self.num_cells+2), dtype=np.int32)
+                for ind in range(self.num_cells):
+                    if d2a[ind][self.num_cells] == 1 and \
+                            d2b[ind][self.num_cells] == 1:
+                        d2c[ind][self.num_cells] = 1
+                        d2c[ind][0] = 2
+                        continue
+                    for jnd in range(self.num_cells):
+                        if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
+                            d2c[ind][jnd] = 1
+                    # How do we decide the operator?
+                    # Choose the first, the better?
+                    d2c[ind][self.num_cells] = d2a[ind][self.num_cells]
+                    # is End or not
+                    if d2a[ind][self.num_cells+1] == 1 and \
+                            d2b[ind][self.num_cells+1] == 1:
+                        d2c[ind][self.num_cells+1] = 1
+                return d2c.flatten()
+
             train_writer.close()
 
 
