@@ -91,14 +91,15 @@ class PathController:
                 path_pool.append(path)
                 dag_pool.append(self._path2dag(path))
                 remain -= 1
-        # path_pool = [  [1, 0, 0, 0, 0, 1, 0,
+        # path_pool = [[1, 0, 3, 0, 2], [0, 0, 1, 0, 2]]
+        # dag_pool = [  [1, 0, 0, 0, 0, 1, 0,
         #                 2, 0, 0, 0, 0, 0, 0,
         #                 0, 1, 0, 0, 0, 3, 0,
         #                 2, 0, 0, 0, 0, 0, 0,
-        #                 0, 0, 0, 1, 0, 2, 1, ],
+        #                 1, 0, 0, 1, 0, 2, 1, ],
         #                [1, 0, 0, 0, 0, 0, 0,
         #                 2, 0, 0, 0, 0, 0, 0,
-        #                 0, 1, 0, 0, 0, 1, 0,
+        #                 0, 1, 0, 0, 0, 1, 1,
         #                 2, 0, 0, 0, 0, 0, 0,
         #                 0, 0, 0, 1, 0, 2, 1,
         #                 ]]
@@ -248,6 +249,12 @@ class PathController:
                         return False
                 return True
 
+            def _is_new_path_in_pool(path, pool):
+                for p in pool:
+                    if (p == path).all():
+                        return False
+                return True
+
             # start evolving
             logger.info("Start evolving...")
             evolve_iter = 0
@@ -266,19 +273,33 @@ class PathController:
                 # apply mutation
                 for ind in seeds:
                     for i in range(self.num_cells):
-                        tmp_path = np.copy(path_pool[ind])
-                        # tmp = tmp_path[i]
-                        tmp_path[i] = np.random.randint(0, self.opt_num+1)
-                        if self._check_path(tmp_path) and \
-                                _is_new_path(tmp_path):
-                            candidate_paths.append(tmp_path)
-                        # tmp_path[i] = tmp
+                        for j in range(self.opt_num+1):
+                            tmp_path = np.copy(path_pool[ind])
+                            # tmp = tmp_path[i]
+                            tmp_path[i] = j  # np.random.randint(0, self.opt_num+1)
+                            if self._check_path(tmp_path) and \
+                                    _is_new_path(tmp_path) and \
+                                    _is_new_path_in_pool(tmp_path, candidate_paths):
+                                candidate_paths.append(tmp_path)
+                            # tmp_path[i] = tmp
+
+                def _crossover(path1, path2, point):
+                    assert(point != 0 and point < self.num_cells)
+                    return np.concatenate((path1[:point], path2[point:])), \
+                            np.concatenate((path2[:point], path1[point:]))
 
                 # apply crossover
-                # for ind1, acc1 in top_k_ind_acc:
-                #     tmp_path1 = path_pool[ind1]
-                #     for ind2, acc2 in top_k_ind_acc:
-                #         tmp_path2 = path_pool[ind2]
+                for ind1 in range(len(path_pool)-1):
+                    for ind2 in range(ind1+1, len(path_pool)):
+                        for point in range(1, self.num_cells):
+                            cpath1, cpath2 = _crossover(path_pool[ind1],
+                                                        path_pool[ind2], point)
+                            for cpath in [cpath1, cpath2]:
+                                if self._check_path(cpath) and \
+                                        _is_new_path(cpath) and \
+                                        _is_new_path_in_pool(cpath,
+                                                             candidate_paths):
+                                    candidate_paths.append(cpath1)
 
                 # predict and select best k
                 logger.info("Candidate Paths: {0}".format(candidate_paths))
@@ -326,39 +347,82 @@ class PathController:
 
 
             # build dags from paths
+            # insert some short paths first
 
-        # path_pool = [  [1, 0, 0, 0, 0, 1, 0,
-        #                 2, 0, 0, 0, 0, 0, 0,
-        #                 0, 1, 0, 0, 0, 3, 0,
-        #                 2, 0, 0, 0, 0, 0, 0,
-        #                 0, 0, 0, 1, 0, 2, 1, ],
-        #                [1, 0, 0, 0, 0, 0, 0,
-        #                 2, 0, 0, 0, 0, 0, 0,
-        #                 0, 1, 0, 0, 0, 1, 0,
-        #                 2, 0, 0, 0, 0, 0, 0,
-        #                 0, 0, 0, 1, 0, 2, 1,
-        #                 ]]
+            # path_pool = [  [1, 0, 0, 0, 0, 1, 0,
+            #                 2, 0, 0, 0, 0, 0, 0,
+            #                 0, 1, 0, 0, 0, 3, 0,
+            #                 2, 0, 0, 0, 0, 0, 0,
+            #                 0, 0, 0, 1, 0, 2, 1, ],
+            #                [1, 0, 0, 0, 0, 0, 0,
+            #                 2, 0, 0, 0, 0, 0, 0,
+            #                 0, 1, 0, 0, 0, 1, 0,
+            #                 2, 0, 0, 0, 0, 0, 0,
+            #                 0, 0, 0, 1, 0, 2, 1,
+            #                 ]]
             def _merge_dag(da, db):
                 d2a = np.reshape(da, (self.num_cells, (self.num_cells+2)))
                 d2b = np.reshape(db, (self.num_cells, (self.num_cells+2)))
                 d2c = np.zeros((self.num_cells, self.num_cells+2), dtype=np.int32)
                 for ind in range(self.num_cells):
-                    if d2a[ind][self.num_cells] == 1 and \
-                            d2b[ind][self.num_cells] == 1:
-                        d2c[ind][self.num_cells] = 1
+                    if d2a[ind][self.num_cells] == 0 and \
+                            d2b[ind][self.num_cells] == 0:
+                        d2c[ind][self.num_cells] = 0
                         d2c[ind][0] = 2
                         continue
+                    if d2a[ind][self.num_cells] == 0:
+                        d2a[ind][0] = 0
+                    if d2b[ind][self.num_cells] == 0:
+                        d2b[ind][0] = 0
                     for jnd in range(self.num_cells):
                         if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
                             d2c[ind][jnd] = 1
                     # How do we decide the operator?
                     # Choose the first, the better?
-                    d2c[ind][self.num_cells] = d2a[ind][self.num_cells]
+                    if d2a[ind][self.num_cells] != 0:
+                        d2c[ind][self.num_cells] = d2a[ind][self.num_cells]
+                    else:
+                        d2c[ind][self.num_cells] = d2b[ind][self.num_cells]
+
                     # is End or not
-                    if d2a[ind][self.num_cells+1] == 1 and \
+                    if d2a[ind][self.num_cells+1] == 1 or \
                             d2b[ind][self.num_cells+1] == 1:
                         d2c[ind][self.num_cells+1] = 1
                 return d2c.flatten()
+
+            being_better = True
+            sort_acc = sorted(enumerate(path_pool_acc), 
+                              key=lambda p: p[1], reverse=True)
+            check_list = np.zeros((len(path_pool)), dtype=np.bool)
+            check_list[0] = True
+            final_dag = dag_pool[sort_acc[0][0]]
+            final_acc = path_pool_acc[sort_acc[0][0]]
+            while being_better:
+                choose_dag = final_dag
+                choose_acc = final_acc
+                choose_ind = 0
+                being_better = False
+                for ind in range(1, len(sort_acc)):
+                    if check_list[ind]:
+                        continue
+                    tmp_dag = _merge_dag(final_dag, dag_pool[sort_acc[ind][0]])
+                    feed_dict = {child_ops["dag_arc"]: tmp_dag}
+                    valid_acc = sess.run(child_ops["valid_rl_acc"],
+                                         feed_dict=feed_dict)
+                    logger.info("Merge {0} acc {1}".format(sort_acc[ind][0], valid_acc))
+                    if valid_acc > choose_acc:
+                        being_better = True
+                        choose_ind = ind
+                        choose_dag = tmp_dag
+                        choose_acc = valid_acc
+                check_list[choose_ind] = True
+                final_dag = choose_dag
+                final_acc = choose_acc
+            logger.info("Final set {}".format(list(enumerate(check_list))))
+            logger.info("Final valid acc{}".format(final_acc))
+            logger.info("Final dag{}".format(final_dag))
+            child_ops["eval_func"](sess, "test",
+                                   feed_dict={child_ops["dag_arc"]: final_dag})
 
             train_writer.close()
 
