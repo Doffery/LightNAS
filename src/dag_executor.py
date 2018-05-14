@@ -33,6 +33,7 @@ class DagExecutor(Model):
                  fixed_arc=None,
                  num_layers=2,
                  num_cells=5,
+                 cd_length=7,
                  out_filters=24,
                  keep_prob=1.0,
                  drop_path_keep_prob=None,
@@ -101,6 +102,10 @@ class DagExecutor(Model):
         self.num_layers = num_layers
         self.num_cells = num_cells
         self.fixed_arc = fixed_arc
+
+        self.cd_length = cd_length
+        self.cd_opt_ind = self.cd_length-2
+        self.cd_end_ind = self.cd_length-1
 
         self.global_step = tf.Variable(
             0, dtype=tf.int32, trainable=False, name="global_step")
@@ -251,6 +256,20 @@ class DagExecutor(Model):
         # return [x, y]
         return x
 
+    def _maybe_adjust_channel(self, layer, out_filters, is_training):
+        """Makes sure layers[0] and layers[1] have the same shapes."""
+
+        c = self._get_C(layer)
+
+        with tf.variable_scope("adjust"):
+            x = layer
+            if c != out_filters:
+                with tf.variable_scope("pool_x"):
+                    x = tf.nn.relu(x)
+                    x = self._factorized_reduction(x, out_filters, 2, is_training)
+
+        return x
+
     def _maybe_calibrate_size(self, layers, out_filters, is_training):
         """Makes sure layers[0] and layers[1] have the same shapes."""
 
@@ -321,29 +340,29 @@ class DagExecutor(Model):
             # Need Mod, layers+2?
             for layer_id in range(self.num_layers + 2):
                 with tf.variable_scope("layer_{0}".format(layer_id)):
-                    # if layer_id not in self.pool_layers:
-                    if self.fixed_arc is None:
-                        x = self._enas_layer(
-                            layer_id, ilayer, self.dag_arc, out_filters)
-                        # layer_id, layers, self.path_arc, out_filters)
-                    else:
-                        x = self._fixed_layer(
-                            layer_id, ilayer, self.dag_arc, out_filters, 1, is_training,
-                            normal_or_reduction_cell="normal")
-                        # layer_id, layers, self.dag_arc, out_filters, 1, is_training,
-                    '''
+                    if layer_id not in self.pool_layers:
+                        if self.fixed_arc is None:
+                            x = self._enas_layer(
+                               layer_id, ilayer, self.dag_arc, out_filters)
+                             #     layer_id, layers, self.dag_arc, out_filters)
+                        else:
+                            x = self._fixed_layer(
+                                layer_id, ilayer, self.dag_arc, out_filters, 1, is_training,
+                                normal_or_reduction_cell="normal")
+                            # layer_id, layers, self.dag_arc, out_filters, 1, is_training,
                     else:
                         out_filters *= 2
                         if self.fixed_arc is None:
                             x = self._factorized_reduction(x, out_filters, 2, is_training)
-                            layers = [layers[-1], x]
+                            # layers = [layers[-1], x]
                             x = self._enas_layer(
-                                layer_id, layers, self.reduce_arc, out_filters)
+                                layer_id, x, self.dag_arc, out_filters)
+                                # layer_id, layers, self.reduce_arc, out_filters)
                         else:
                             x = self._fixed_layer(
-                                layer_id, layers, self.reduce_arc, out_filters, 2, is_training,
+                                layer_id, ilayer, self.reduce_arc, out_filters, 2, is_training,
                                 normal_or_reduction_cell="reduction")
-                    '''
+                                # layer_id, layers, self.reduce_arc, out_filters, 2, is_training,
                     logger.info("Layer {0:>2d}: {1}".format(layer_id, x))
                     ilayer = x
 
@@ -734,6 +753,7 @@ class DagExecutor(Model):
         # layers = self._maybe_calibrate_size(layers, out_filters, is_training=True)
         layers = [prev_layer]
         used = []
+        possible_end_length = self.num_cells+1
         for cell_id in range(self.num_cells):
             prev_layers = layers
             # prev_layers = tf.stack(layers, axis=0)
@@ -743,14 +763,14 @@ class DagExecutor(Model):
                 # x_op = arc[2 * cell_id + 1]
                 # x = prev_layers[x_id, :, :, :, :]
                 # x = self._enas_cell(x, cell_id, x_id, x_op, out_filters)
-                start_idx = (self.num_cells+2) * cell_id
+                start_idx = (self.cd_length) * cell_id
                 x = self._enas_dag_cell(prev_layers, cell_id,
-                                    arc[start_idx:start_idx+self.num_cells],
-                                    arc[start_idx+self.num_cells], out_filters)
+                                    arc[start_idx:start_idx+self.cd_opt_ind],
+                                    arc[start_idx+self.cd_opt_ind], out_filters)
                 # x_used = tf.one_hot(x_id, depth=self.num_cells + 2, dtype=tf.int32)
-                x_used = tf.cond(tf.equal(arc[start_idx+self.num_cells+1], 0),
-                        lambda: tf.zeros([self.num_cells+1], tf.int32),
-                        lambda: tf.one_hot(cell_id+1, depth=self.num_cells + 1,
+                x_used = tf.cond(tf.equal(arc[start_idx+self.cd_end_ind], 0),
+                        lambda: tf.zeros([possible_end_length], tf.int32),
+                        lambda: tf.one_hot(cell_id+1, depth=possible_end_length,
                                             dtype=tf.int32))
 
                 # with tf.variable_scope("y"):
@@ -804,7 +824,7 @@ class DagExecutor(Model):
             raise ValueError("Unknown data_format '{0}'".format(self.data_format))
 
         with tf.variable_scope("final_conv"):
-            w = create_weight("w", [self.num_cells + 1, out_filters * out_filters])
+            w = create_weight("w", [possible_end_length, out_filters * out_filters])
             w = tf.gather(w, indices, axis=0)
             w = tf.reshape(w, [1, 1, num_outs * out_filters, out_filters])
             out = tf.nn.relu(out)
@@ -947,9 +967,13 @@ class DagExecutor(Model):
         if self.fixed_arc is None:
             # self.path_arc = tf.placeholder(tf.int32, shape=(self.num_cells))
             self.dag_arc = tf.placeholder(tf.int32, shape=(
-                                          self.num_cells*(self.num_cells+2)))
-            self.dag_arc = tf.Print(self.dag_arc, [self.dag_arc], 
+                                          self.num_cells*self.cd_length))
+            # self.reduce_arc = tf.placeholder(tf.int32, shape=(
+            #                               self.num_cells*(self.cd_length)))
+            self.dag_arc = tf.Print(self.dag_arc, [self.dag_arc],
                                     'dag_arc: ', summarize=100)
+            # self.reduce_arc = tf.Print(self.reduce_arc, [self.reduce_arc],
+            #                            'reduce_arc: ', summarize=100)
             # self.dag_end_points = tf.placeholder(tf.int32, shape=(
             #                               self.num_cells+1))
             # self.path_arc = controller_model.sample_path_arc

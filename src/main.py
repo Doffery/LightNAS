@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+os.environ['CUDA_VISIBLE_DEVICES'] = '3'
 
 logger = utils.logger
 
@@ -68,13 +68,15 @@ DEFINE_boolean("child_use_aux_heads", False, "Should we use an aux head")
 DEFINE_boolean("child_sync_replicas", False, "To sync or not to sync.")
 DEFINE_boolean("child_lr_cosine", False, "Use cosine lr schedule")
 
+DEFINE_integer("cd_length", 7, "cell_descriptor_length")
 DEFINE_boolean("controller_search_whole_channels", False, "")
 DEFINE_integer("opt_num", 5, "num of ops can be selected")
 DEFINE_integer("path_pool_size", 10, "")
 DEFINE_integer("k_init_selection_num", 5, "")
 DEFINE_integer("k_best_selection_num", 5, "")
-DEFINE_integer("max_generation", 10, "")
+DEFINE_integer("max_generation", 50, "")
 
+DEFINE_integer("train_every_generations", 5, "train again after n generations")
 DEFINE_integer("log_every", 50, "How many steps to log")
 DEFINE_integer("eval_every", 23, "How many steps to log")
 # DEFINE_integer("eval_every_epochs", 1, "How many epochs to eval")
@@ -104,6 +106,7 @@ def get_ops(images, labels):
       whole_channels=FLAGS.controller_search_whole_channels,
       num_layers=FLAGS.child_num_layers,
       num_cells=FLAGS.child_num_cells,
+      cd_length=FLAGS.cd_length,
       num_branches=FLAGS.child_num_branches,
       fixed_arc=FLAGS.child_fixed_arc,
       out_filters_scale=FLAGS.child_out_filters_scale,
@@ -175,6 +178,7 @@ def train():
         child_ops = ops["child"]
         pc = path_controller.PathController(
                 num_cells=FLAGS.child_num_cells,
+                cd_length=FLAGS.cd_length,
                 opt_num=FLAGS.opt_num,
                 path_pool_size=FLAGS.path_pool_size,
                 k_init_selection_num=FLAGS.k_init_selection_num,

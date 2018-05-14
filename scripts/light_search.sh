@@ -15,7 +15,8 @@ python src/main.py \
   --log_every=50 \
   --eval_every=23 \
   --eval_every_epochs=1 \
-  --max_generation=30 \
+  --max_generation=100 \
+  --train_every_generations=5 \
   --child_use_aux_heads \
   --child_num_layers=6 \
   --child_out_filters=20 \
