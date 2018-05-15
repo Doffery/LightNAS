@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 logger = utils.logger
 
@@ -147,6 +147,7 @@ def get_ops(images, labels):
       "valid_rl_acc": child_model.valid_rl_acc,
       # "path_arc": child_model.path_arc,
       "dag_arc": child_model.dag_arc,
+      "reduce_arc": child_model.reduce_arc,
       "num_train_batches": child_model.num_train_batches,
       # "eval_every": child_model.num_train_batches * FLAGS.eval_every_epochs,
       "eval_func": child_model.eval_once,

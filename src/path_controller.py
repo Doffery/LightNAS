@@ -29,6 +29,7 @@ class PathController:
         logger.info("*" * 80)
         logger.info('Start building controller')
         self.num_cells = num_cells
+        self.num_cells_double = num_cells * 2
         self.cd_length = cd_length
         self.cd_opt_ind = self.cd_length-2
         self.cd_end_ind = self.cd_length-1
@@ -45,7 +46,9 @@ class PathController:
         return tf.random_normal([1, 3], mean=-1, stddev=4)
 
     def _check_path(self, path):
-        return path.tolist().count(0) < self.num_cells-1
+        # return path.tolist().count(0) < self.num_cells-1
+        return path[:self.num_cells].tolist().count(0) < self.num_cells-1 and \
+                path[self.num_cells:].tolist().count(0) < self.num_cells-1
 
     def _path2dag(self, path):
         opt_ind = self.cd_opt_ind
@@ -86,9 +89,9 @@ class PathController:
                     num -= 1
             return [t[1] for t in sample_dict.items()]
 
-        dag_pool = []
+        # dag_pool = []
         path_pool = []
-        remain = self.path_pool_size
+        remain = self.path_pool_size * 2  # for both dag and reduce dag
         for i in range(1, self.num_cells):
             length = i+1
             remain_each_length = remain // (self.num_cells-i)
@@ -97,8 +100,12 @@ class PathController:
             for path in paths:
                 logger.info(path)
                 path_pool.append(path)
-                dag_pool.append(self._path2dag(path))
+                # dag_pool.append(self._path2dag(path))
                 remain -= 1
+        np.random.shuffle(path_pool)  # short path, long path mixed together
+        assert(len(path_pool) == self.path_pool_size*2)
+        path_pool_concat = np.reshape(path_pool, 
+                                      (self.path_pool_size, self.num_cells_double))
         # path_pool = [[1, 0, 3, 0, 2], [0, 0, 1, 0, 2]]
         # dag_pool = [  [1, 0, 0, 0, 0, 1, 0,
         #                 2, 0, 0, 0, 0, 0, 0,
@@ -112,7 +119,7 @@ class PathController:
         #                 0, 0, 0, 1, 0, 2, 1,
         #                 ]]
         # we better return both dag and path
-        return path_pool, dag_pool
+        return path_pool_concat  # , dag_pool
 
     def _init_pool(self, path_pool):
         path_pool = np.where(True, path_pool, -1)
@@ -143,7 +150,8 @@ class PathController:
         #         }
         # random init a pool of paths
         # self.num_cells possible connections, +1 chosen ops
-        path_pool, dag_pool = self._init_pool_as_paths()
+        # path_pool, dag_pool = self._init_pool_as_paths()
+        path_pool = self._init_pool_as_paths()
         path_pool_acc = np.zeros(shape=(self.path_pool_size), dtype=float)
        
         saver = tf.train.Saver(max_to_keep=2)
@@ -181,7 +189,8 @@ class PathController:
                 t_epoch_num = self.epoch + extra_epoch_num
                 while True:
                     for i in range(self.path_pool_size):
-                        feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
+                        feed_dict = {child_ops["dag_arc"]: self._path2dag(path_pool[i][:self.num_cells]),
+                                child_ops["reduce_arc"]: self._path2dag(path_pool[i][self.num_cells:])}
                         if self.iteration % 100 == 1:
                             run_ops = [
                                     merged,
@@ -238,7 +247,9 @@ class PathController:
 
                     if self.epoch >= t_epoch_num:
                         for i in range(self.path_pool_size):
-                            feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
+                            feed_dict = {child_ops["dag_arc"]: self._path2dag(path_pool[i][:self.num_cells]),
+                                    child_ops["reduce_arc"]: self._path2dag(path_pool[i][self.num_cells:])}
+                            # feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
                             valid_acc = sess.run(child_ops["valid_rl_acc"],
                                                  feed_dict=feed_dict)
                             path_pool_acc[i] = valid_acc
@@ -280,7 +291,7 @@ class PathController:
 
                 # apply mutation
                 for ind in seeds:
-                    for i in range(self.num_cells):
+                    for i in range(self.num_cells_double):
                         for j in range(self.opt_num+1):
                             tmp_path = np.copy(path_pool[ind])
                             # tmp = tmp_path[i]
@@ -292,14 +303,14 @@ class PathController:
                             # tmp_path[i] = tmp
 
                 def _crossover(path1, path2, point):
-                    assert(point != 0 and point < self.num_cells)
+                    assert(point != 0 and point < self.num_cells_double)
                     return np.concatenate((path1[:point], path2[point:])), \
                             np.concatenate((path2[:point], path1[point:]))
 
                 # apply crossover
                 for ind1 in range(len(path_pool)-1):
                     for ind2 in range(ind1+1, len(path_pool)):
-                        for point in range(1, self.num_cells):
+                        for point in range(1, self.num_cells_double):
                             cpath1, cpath2 = _crossover(path_pool[ind1],
                                                         path_pool[ind2], point)
                             for cpath in [cpath1, cpath2]:
@@ -307,14 +318,16 @@ class PathController:
                                         _is_new_path(cpath) and \
                                         _is_new_path_in_pool(cpath,
                                                              candidate_paths):
-                                    candidate_paths.append(cpath1)
+                                    candidate_paths.append(cpath)
 
                 # predict and select best k
                 logger.info("Candidate Paths: {0}".format(candidate_paths))
                 candidate_accs = []
                 for i, cpath in enumerate(candidate_paths):
-                    cdag = self._path2dag(cpath)
-                    feed_dict = {child_ops["dag_arc"]: cdag}
+                    # cdag = self._path2dag(cpath)
+                    feed_dict = {child_ops["dag_arc"]: self._path2dag(cpath[:self.num_cells]),
+                            child_ops["reduce_arc"]: self._path2dag(cpath[self.num_cells:])}
+                    # feed_dict = {child_ops["dag_arc"]: cdag}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
@@ -338,15 +351,15 @@ class PathController:
                 #     del path_pool[d_ind]
                 #     del path_pool_acc[d_ind]
                 tmp_path_pool = []
-                tmp_dag_pool = []
+                # tmp_dag_pool = []
                 tmp_path_pool_acc = []
                 for ind in range(len(path_pool)):
                     if ind not in del_inx:
                         tmp_path_pool.append(path_pool[ind])
-                        tmp_dag_pool.append(self._path2dag(path_pool[ind]))
+                        # tmp_dag_pool.append(self._path2dag(path_pool[ind]))
                         tmp_path_pool_acc.append(path_pool_acc[ind])
                 path_pool = np.array(tmp_path_pool)
-                dag_pool = np.array(tmp_dag_pool)
+                # dag_pool = np.array(tmp_dag_pool)
                 path_pool_acc = np.array(tmp_path_pool_acc)
 
                 if evolve_iter % FLAGS.train_every_generations == 0:
@@ -409,18 +422,24 @@ class PathController:
                               key=lambda p: p[1], reverse=True)
             check_list = np.zeros((len(path_pool)), dtype=np.bool)
             check_list[0] = True
-            final_dag = dag_pool[sort_acc[0][0]]
+            final_dag = self._path2dag(path_pool[sort_acc[0][0]][:self.num_cells])
+            final_dag_reduce = self._path2dag(path_pool[sort_acc[0][0]][self.num_cells:])
             final_acc = path_pool_acc[sort_acc[0][0]]
             while being_better:
                 choose_dag = final_dag
+                choose_dag_reduce = final_dag_reduce
                 choose_acc = final_acc
                 choose_ind = 0
                 being_better = False
                 for ind in range(1, len(sort_acc)):
                     if check_list[ind]:
                         continue
-                    tmp_dag = _merge_dag(final_dag, dag_pool[sort_acc[ind][0]])
-                    feed_dict = {child_ops["dag_arc"]: tmp_dag}
+                    tmp_dag = _merge_dag(final_dag, self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
+                    tmp_dag_reduce = _merge_dag(final_dag_reduce,
+                            self._path2dag(path_pool[sort_acc[ind][0]][self.num_cells:]))
+                    # feed_dict = {child_ops["dag_arc"]: tmp_dag}
+                    feed_dict = {child_ops["dag_arc"]: tmp_dag,
+                            child_ops["reduce_arc"]: tmp_dag_reduce}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     logger.info("Merge {0} acc {1}".format(sort_acc[ind][0], valid_acc))
@@ -428,15 +447,19 @@ class PathController:
                         being_better = True
                         choose_ind = ind
                         choose_dag = tmp_dag
+                        choose_dag_reduce = tmp_dag_reduce
                         choose_acc = valid_acc
                 check_list[choose_ind] = True
                 final_dag = choose_dag
+                final_dag_reduce = choose_dag_reduce
                 final_acc = choose_acc
             logger.info("Final set {}".format(list(enumerate(check_list))))
             logger.info("Final valid acc{}".format(final_acc))
             logger.info("Final dag{}".format(final_dag))
+            logger.info("Final reduce dag{}".format(final_dag_reduce))
             child_ops["eval_func"](sess, "test",
-                                   feed_dict={child_ops["dag_arc"]: final_dag})
+                                   feed_dict={child_ops["dag_arc"]: final_dag,
+                                              child_ops["reduce_arc"]: final_dag_reduce})
 
             train_writer.close()
 

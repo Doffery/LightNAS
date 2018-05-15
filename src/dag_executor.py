@@ -803,7 +803,8 @@ class DagExecutor(Model):
         out = tf.stack(layers, axis=0)
         out = tf.gather(out, indices, axis=0)
 
-        tf.Assert(tf.greater(num_outs, 0), [num_outs, indices])  # at least one
+        at_least_one_end = tf.Assert(tf.greater(num_outs, 0), 
+                                     [num_outs, indices])  # at least one
 
         inp = prev_layer
         if self.data_format == "NHWC":
@@ -823,14 +824,15 @@ class DagExecutor(Model):
         else:
             raise ValueError("Unknown data_format '{0}'".format(self.data_format))
 
-        with tf.variable_scope("final_conv"):
-            w = create_weight("w", [possible_end_length, out_filters * out_filters])
-            w = tf.gather(w, indices, axis=0)
-            w = tf.reshape(w, [1, 1, num_outs * out_filters, out_filters])
-            out = tf.nn.relu(out)
-            out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
-                               data_format=self.data_format)
-            out = batch_norm(out, is_training=True, data_format=self.data_format)
+        with tf.control_dependencies([at_least_one_end]):
+            with tf.variable_scope("final_conv"):
+                w = create_weight("w", [possible_end_length, out_filters * out_filters])
+                w = tf.gather(w, indices, axis=0)
+                w = tf.reshape(w, [1, 1, num_outs * out_filters, out_filters])
+                out = tf.nn.relu(out)
+                out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
+                                   data_format=self.data_format)
+                out = batch_norm(out, is_training=True, data_format=self.data_format)
 
         # out = tf.reshape(out, tf.shape(prev_layers[0]))
         out = tf.reshape(out, tf.shape(prev_layer))
@@ -968,12 +970,12 @@ class DagExecutor(Model):
             # self.path_arc = tf.placeholder(tf.int32, shape=(self.num_cells))
             self.dag_arc = tf.placeholder(tf.int32, shape=(
                                           self.num_cells*self.cd_length))
-            # self.reduce_arc = tf.placeholder(tf.int32, shape=(
-            #                               self.num_cells*(self.cd_length)))
+            self.reduce_arc = tf.placeholder(tf.int32, shape=(
+                                          self.num_cells*(self.cd_length)))
             self.dag_arc = tf.Print(self.dag_arc, [self.dag_arc],
                                     'dag_arc: ', summarize=100)
-            # self.reduce_arc = tf.Print(self.reduce_arc, [self.reduce_arc],
-            #                            'reduce_arc: ', summarize=100)
+            self.reduce_arc = tf.Print(self.reduce_arc, [self.reduce_arc],
+                                       'reduce_arc: ', summarize=100)
             # self.dag_end_points = tf.placeholder(tf.int32, shape=(
             #                               self.num_cells+1))
             # self.path_arc = controller_model.sample_path_arc
