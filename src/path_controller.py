@@ -166,6 +166,7 @@ class PathController:
         logger.info("-" * 80)
         logger.info("Starting session")
         config = tf.ConfigProto(allow_soft_placement=True)
+        #                         log_device_placement=True)
         merged = tf.summary.merge_all()
 
 
@@ -424,6 +425,10 @@ class PathController:
             check_list[0] = True
             final_dag = self._path2dag(path_pool[sort_acc[0][0]][:self.num_cells])
             final_dag_reduce = self._path2dag(path_pool[sort_acc[0][0]][self.num_cells:])
+            logger.info("Merge dag{}".format(np.reshape(final_dag,
+                (self.num_cells, self.cd_length))))
+            logger.info("Merge reduce dag{}".format(np.reshape(final_dag_reduce,
+                (self.num_cells, self.cd_length))))
             final_acc = path_pool_acc[sort_acc[0][0]]
             while being_better:
                 choose_dag = final_dag
@@ -434,7 +439,8 @@ class PathController:
                 for ind in range(1, len(sort_acc)):
                     if check_list[ind]:
                         continue
-                    tmp_dag = _merge_dag(final_dag, self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
+                    tmp_dag = _merge_dag(final_dag,
+                            self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
                     tmp_dag_reduce = _merge_dag(final_dag_reduce,
                             self._path2dag(path_pool[sort_acc[ind][0]][self.num_cells:]))
                     # feed_dict = {child_ops["dag_arc"]: tmp_dag}
@@ -453,10 +459,16 @@ class PathController:
                 final_dag = choose_dag
                 final_dag_reduce = choose_dag_reduce
                 final_acc = choose_acc
+                logger.info("Merge dag{}".format(np.reshape(final_dag,
+                    (self.num_cells, self.cd_length))))
+                logger.info("Merge reduce dag{}".format(np.reshape(final_dag_reduce,
+                    (self.num_cells, self.cd_length))))
             logger.info("Final set {}".format(list(enumerate(check_list))))
             logger.info("Final valid acc{}".format(final_acc))
-            logger.info("Final dag{}".format(final_dag))
-            logger.info("Final reduce dag{}".format(final_dag_reduce))
+            logger.info("Final dag{}".format(np.reshape(final_dag,
+                (self.num_cells, self.cd_length))))
+            logger.info("Final reduce dag{}".format(np.reshape(final_dag_reduce,
+                (self.num_cells, self.cd_length))))
             child_ops["eval_func"](sess, "test",
                                    feed_dict={child_ops["dag_arc"]: final_dag,
                                               child_ops["reduce_arc"]: final_dag_reduce})

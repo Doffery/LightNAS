@@ -18,6 +18,9 @@ from src.image_ops import global_avg_pool
 
 from src.utils import count_model_params
 from src.utils import get_train_ops
+from src.utils import get_grads
+from src.utils import get_train_ops_re
+from src.utils import average_gradients
 from src.common_ops import create_weight
 
 
@@ -28,6 +31,7 @@ class DagExecutor(Model):
     def __init__(self,
                  images,
                  labels,
+                 num_gpus=1,
                  use_aux_heads=False,
                  cutout_size=None,
                  fixed_arc=None,
@@ -89,6 +93,7 @@ class DagExecutor(Model):
         else:
             raise ValueError("Unknown data_format '{0}'".format(self.data_format))
 
+        self.num_gpus = num_gpus
         self.use_aux_heads = use_aux_heads
         self.num_epochs = num_epochs
         self.num_train_steps = self.num_epochs * self.num_train_batches
@@ -304,6 +309,7 @@ class DagExecutor(Model):
 
     def _model(self, images, is_training, reuse=False):
         """Compute the logits given the images."""
+        # tf.get_variable_scope().reuse_variables()
 
         if self.fixed_arc is None:
             is_training = True
@@ -311,7 +317,8 @@ class DagExecutor(Model):
         logger.info("Model image shape:{0}".format(images))
         # tf.Print(images, [images[0]], 'image data: ')
 
-        with tf.variable_scope(self.name, reuse=reuse):
+        with tf.variable_scope(self.name, reuse=tf.AUTO_REUSE):
+        # with tf.variable_scope(self.name, reuse=reuse):
             # the first two inputs, we do not need two, or even one?
             with tf.variable_scope("stem_conv"):
                 # w = create_weight("w", [3, 3, 3, self.out_filters * 3])
@@ -842,38 +849,50 @@ class DagExecutor(Model):
     def _build_train(self):
         logger.info("-" * 80)
         logger.info("Build train graph")
-        logits = self._model(self.x_train, is_training=True)
-        log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=logits, labels=self.y_train)
-        self.loss = tf.reduce_mean(log_probs)
+        tower_grads = []
+        tower_grad_norm = []
+        for i in range(self.num_gpus):  # FLAGS.num_gpus
+            with tf.device('/gpu:%d' % i):
+                logits = self._model(self.x_train, is_training=True)
+                log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    logits=logits, labels=self.y_train)
+                self.loss = tf.reduce_mean(log_probs)
 
-        if self.use_aux_heads:
-            log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=self.aux_logits, labels=self.y_train)
-            self.aux_loss = tf.reduce_mean(log_probs)
-            train_loss = self.loss + 0.4 * self.aux_loss
-        else:
-            train_loss = self.loss
+                if self.use_aux_heads:
+                    log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                        logits=self.aux_logits, labels=self.y_train)
+                    self.aux_loss = tf.reduce_mean(log_probs)
+                    train_loss = self.loss + 0.4 * self.aux_loss
+                else:
+                    train_loss = self.loss
 
-        self.train_preds = tf.argmax(logits, axis=1)
-        self.train_preds = tf.to_int32(self.train_preds)
-        self.train_acc = tf.equal(self.train_preds, self.y_train)
-        self.train_acc = tf.to_int32(self.train_acc)
-        self.train_acc = tf.reduce_sum(self.train_acc)
+                self.train_preds = tf.argmax(logits, axis=1)
+                self.train_preds = tf.to_int32(self.train_preds)
+                self.train_acc = tf.equal(self.train_preds, self.y_train)
+                self.train_acc = tf.to_int32(self.train_acc)
+                self.train_acc = tf.reduce_sum(self.train_acc)
+                tf_variables = [
+                    var for var in tf.trainable_variables() if (
+                        var.name.startswith(self.name) and "aux_head" not in var.name)]
 
+                self.num_vars = count_model_params(tf_variables)
+                logger.info("Model has {0} params".format(self.num_vars))
+                grads, grad_norm = get_grads(train_loss,
+                                             tf_variables,
+                                             clip_mode=self.clip_mode,
+                                             grad_bound=self.grad_bound,
+                                             l2_reg=self.l2_reg)
+                tower_grads.append(grads)
+                tower_grad_norm.append(grad_norm)
+        grads = average_gradients(tower_grads)
+        self.grad_norm = tf.reduce_mean(tower_grad_norm)
         tf_variables = [
             var for var in tf.trainable_variables() if (
                 var.name.startswith(self.name) and "aux_head" not in var.name)]
-        self.num_vars = count_model_params(tf_variables)
-        logger.info("Model has {0} params".format(self.num_vars))
-
-        self.train_op, self.lr, self.grad_norm, self.optimizer = get_train_ops(
-            train_loss,
+        self.train_op, self.lr, self.optimizer = get_train_ops_re(
+            grads,
             tf_variables,
             self.global_step,
-            clip_mode=self.clip_mode,
-            grad_bound=self.grad_bound,
-            l2_reg=self.l2_reg,
             lr_init=self.lr_init,
             lr_dec_start=self.lr_dec_start,
             lr_dec_every=self.lr_dec_every,
@@ -986,6 +1005,7 @@ class DagExecutor(Model):
             # fixed_arc.reshape()
             self.dag_arc = fixed_arc
 
+        # with tf.variable_scope(tf.get_variable_scope()):
         self._build_train()
         self._build_valid()
         self.build_valid_rl()

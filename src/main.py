@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
 
 logger = utils.logger
 
@@ -36,6 +36,7 @@ DEFINE_string("summaries_dir", "", "")
 DEFINE_string("data_format", "NHWC", "'NHWC' or 'NCWH'")
 DEFINE_string("search_for", None, "Must be [macro|micro]")
 
+DEFINE_integer("num_gpus", 1, "")
 DEFINE_integer("batch_size", 32, "")
 
 DEFINE_integer("num_epochs_evolve", 3, "")
@@ -101,6 +102,7 @@ def get_ops(images, labels):
     child_model = ChildClass(
       images,
       labels,
+      num_gpus=FLAGS.num_gpus,
       use_aux_heads=FLAGS.child_use_aux_heads,
       cutout_size=FLAGS.child_cutout_size,
       whole_channels=FLAGS.controller_search_whole_channels,
