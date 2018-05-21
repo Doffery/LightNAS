@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 logger = utils.logger
 
@@ -37,6 +37,7 @@ DEFINE_string("data_format", "NHWC", "'NHWC' or 'NCWH'")
 DEFINE_string("search_for", None, "Must be [macro|micro]")
 
 DEFINE_integer("num_gpus", 1, "")
+DEFINE_integer("num_cpus", 1, "")
 DEFINE_integer("batch_size", 32, "")
 
 DEFINE_integer("num_epochs_evolve", 3, "")
@@ -103,12 +104,13 @@ def get_ops(images, labels):
       images,
       labels,
       num_gpus=FLAGS.num_gpus,
+      num_cpus=FLAGS.num_cpus,
       use_aux_heads=FLAGS.child_use_aux_heads,
       cutout_size=FLAGS.child_cutout_size,
       whole_channels=FLAGS.controller_search_whole_channels,
       num_layers=FLAGS.child_num_layers,
       num_cells=FLAGS.child_num_cells,
-      cd_length=FLAGS.cd_length,
+      cd_length=FLAGS.child_num_cells+2,
       num_branches=FLAGS.child_num_branches,
       fixed_arc=FLAGS.child_fixed_arc,
       out_filters_scale=FLAGS.child_out_filters_scale,
@@ -147,6 +149,7 @@ def get_ops(images, labels):
       "train_acc": child_model.train_acc,
       "optimizer": child_model.optimizer,
       "valid_rl_acc": child_model.valid_rl_acc,
+      "valid_acc": child_model.valid_acc,
       # "path_arc": child_model.path_arc,
       "dag_arc": child_model.dag_arc,
       "reduce_arc": child_model.reduce_arc,
@@ -181,15 +184,18 @@ def train():
         child_ops = ops["child"]
         pc = path_controller.PathController(
                 num_cells=FLAGS.child_num_cells,
-                cd_length=FLAGS.cd_length,
+                cd_length=FLAGS.child_num_cells+2,
                 opt_num=FLAGS.opt_num,
                 path_pool_size=FLAGS.path_pool_size,
                 k_init_selection_num=FLAGS.k_init_selection_num,
                 k_best_selection_num=FLAGS.k_best_selection_num,
                 max_generation=FLAGS.max_generation)
         # pc.build_path_pool_out_tensor(child_ops)
-        pc.build_path_pool_full_arc(child_ops)
         # pc.build_path_pool(10)
+        if FLAGS.child_fixed_arc is None:
+            pc.build_path_pool_full_arc(child_ops)
+        else:
+            pc.eval_dag_arc(child_ops)
 
 
 def main(_):

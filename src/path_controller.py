@@ -92,7 +92,7 @@ class PathController:
         # dag_pool = []
         path_pool = []
         remain = self.path_pool_size * 2  # for both dag and reduce dag
-        for i in range(1, self.num_cells):
+        for i in range(self.num_cells-2, self.num_cells):
             length = i+1
             remain_each_length = remain // (self.num_cells-i)
             paths = _sample_path(length, remain_each_length)
@@ -168,6 +168,8 @@ class PathController:
         config = tf.ConfigProto(allow_soft_placement=True)
         #                         log_device_placement=True)
         merged = tf.summary.merge_all()
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
 
 
         # print("Variables:")
@@ -176,7 +178,8 @@ class PathController:
         with tf.train.SingularMonitoredSession(
           config=config, hooks=hooks, checkpoint_dir=FLAGS.output_dir) as sess:
         # with tf.Session() as sess:
-            train_writer = tf.summary.FileWriter(FLAGS.summaries_dir, sess.graph)
+            train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
+                                                 sess.graph)
             run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
             run_metadata = tf.RunMetadata()
 
@@ -293,7 +296,7 @@ class PathController:
                 # apply mutation
                 for ind in seeds:
                     for i in range(self.num_cells_double):
-                        for j in range(self.opt_num+1):
+                        for j in range(1, self.opt_num+1):
                             tmp_path = np.copy(path_pool[ind])
                             # tmp = tmp_path[i]
                             tmp_path[i] = j  # np.random.randint(0, self.opt_num+1)
@@ -332,6 +335,7 @@ class PathController:
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
+                    # child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
                     candidate_accs.append(valid_acc)
 
                 top_k_candidates = utils.find_top_k_ind(candidate_accs,
@@ -393,8 +397,7 @@ class PathController:
                 d2c = np.zeros((self.num_cells, self.cd_length),
                                dtype=np.int32)
                 for ind in range(self.num_cells):
-                    if d2a[ind][opt_ind] == 0 and \
-                            d2b[ind][opt_ind] == 0:
+                    if d2a[ind][opt_ind] == 0 and d2b[ind][opt_ind] == 0:
                         d2c[ind][opt_ind] = 0
                         d2c[ind][0] = 2
                         continue
@@ -449,6 +452,8 @@ class PathController:
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     logger.info("Merge {0} acc {1}".format(sort_acc[ind][0], valid_acc))
+                    logger.info(self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
+                    logger.info(tmp_dag)
                     if valid_acc > choose_acc:
                         being_better = True
                         choose_ind = ind
@@ -469,10 +474,104 @@ class PathController:
                 (self.num_cells, self.cd_length))))
             logger.info("Final reduce dag{}".format(np.reshape(final_dag_reduce,
                 (self.num_cells, self.cd_length))))
+            for i in range(self.num_cells):
+                start_idx = i * self.cd_length
+                for dag in [final_dag, final_dag_reduce]:
+                    if dag[start_idx+self.cd_opt_ind] == 0:
+                        dag[start_idx] = 2
             child_ops["eval_func"](sess, "test",
                                    feed_dict={child_ops["dag_arc"]: final_dag,
                                               child_ops["reduce_arc"]: final_dag_reduce})
 
             train_writer.close()
 
+    def eval_dag_arc(self, child_ops):
+        saver = tf.train.Saver(max_to_keep=2)
+        checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+          FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
+       
+        hooks = [checkpoint_saver_hook]
+        if FLAGS.child_sync_replicas:
+            sync_replicas_hook = child_ops["optimizer"].make_session_run_hook(True)
+            hooks.append(sync_replicas_hook)
+       
+        logger.info("-" * 80)
+        logger.info("Starting session")
+        config = tf.ConfigProto(allow_soft_placement=True)
+        #                         log_device_placement=True)
+        merged = tf.summary.merge_all()
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
+
+
+        # print("Variables:")
+        # for var in tf.trainable_variables():
+        #     print(var)
+        with tf.train.SingularMonitoredSession(
+          config=config) as sess:
+        # with tf.Session() as sess:
+            train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
+                                                 sess.graph)
+            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+            run_metadata = tf.RunMetadata()
+
+            start_time = time.time()
+            # train each path, get validation acc
+            # get the initial population
+            self.iteration = 0
+            self.epoch = 0
+            while True:
+                if self.iteration % 100 == 1:
+                    run_ops = [
+                            merged,
+                            child_ops["loss"],
+                            child_ops["lr"],
+                            child_ops["grad_norm"],
+                            child_ops["train_acc"],
+                            child_ops["train_op"],
+                            ]
+                    summary, loss, lr, gn, tr_acc, _ = sess.run(run_ops,
+                            options=run_options, run_metadata=run_metadata)
+                    train_writer.add_run_metadata(run_metadata,
+                                          'step{0}'.format(self.iteration))
+                    train_writer.add_summary(summary, self.iteration)
+                    logger.info("Finish t_step {0}".format(self.iteration))
+                else:
+                    run_ops = [
+                            child_ops["loss"],
+                            child_ops["lr"],
+                            child_ops["grad_norm"],
+                            child_ops["train_acc"],
+                            child_ops["train_op"],
+                            ]
+                    loss, lr, gn, tr_acc, _ = sess.run(run_ops)
+
+                global_step = sess.run(child_ops["global_step"])
+                self.iteration = global_step
+
+                if FLAGS.child_sync_replicas:
+                    actual_step = global_step * FLAGS.num_aggregate
+                else:
+                    actual_step = global_step
+                self.epoch = actual_step // child_ops["num_train_batches"]
+                curr_time = time.time()
+                if global_step % FLAGS.log_every == 0:
+                    logger.info("Global Step at {}".format(global_step))
+                    log_string = ""
+                    log_string += "epoch={:<6d}".format(self.epoch)
+                    log_string += "ch_step={:<6d}".format(global_step)
+                    log_string += " loss={:<8.6f}".format(loss)
+                    log_string += " lr={:<8.4f}".format(lr)
+                    log_string += " |g|={:<8.4f}".format(gn)
+                    log_string += " tr_acc={:<3d}/{:>3d}".format(
+                        tr_acc, FLAGS.batch_size)
+                    log_string += " mins={:<10.2f}".format(
+                        float(curr_time - start_time) / 60)
+                    logger.info(log_string)
+
+                    child_ops["eval_func"](sess, "test")
+
+                if self.epoch >= FLAGS.num_epochs:
+                    break
+            train_writer.close()
 

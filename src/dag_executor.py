@@ -32,6 +32,7 @@ class DagExecutor(Model):
                  images,
                  labels,
                  num_gpus=1,
+                 num_cpus=1,
                  use_aux_heads=False,
                  cutout_size=None,
                  fixed_arc=None,
@@ -94,6 +95,7 @@ class DagExecutor(Model):
             raise ValueError("Unknown data_format '{0}'".format(self.data_format))
 
         self.num_gpus = num_gpus
+        self.num_cpus = num_cpus
         self.use_aux_heads = use_aux_heads
         self.num_epochs = num_epochs
         self.num_train_steps = self.num_epochs * self.num_train_batches
@@ -181,7 +183,6 @@ class DagExecutor(Model):
             x: tensor of shape [N, H, W, C] or [N, C, H, W]
         """
         if self.data_format == "NHWC":
-            #logger.info('Where am I ?1')
             return x.get_shape()[3].value
         elif self.data_format == "NCHW":
             # logger.info('Where am I ?2')
@@ -327,7 +328,7 @@ class DagExecutor(Model):
                 x = tf.nn.conv2d(
                     images, w, [1, 1, 1, 1], "SAME", data_format=self.data_format)
                 x = batch_norm(x, is_training, data_format=self.data_format)
-            if self.data_format == "NHCW":
+            if self.data_format == "NHWC":
                 split_axis = 3
             elif self.data_format == "NCHW":
                 split_axis = 1
@@ -363,11 +364,12 @@ class DagExecutor(Model):
                             x = self._factorized_reduction(x, out_filters, 2, is_training)
                             # layers = [layers[-1], x]
                             x = self._enas_layer(
-                                layer_id, x, self.dag_arc, out_filters)
+                                layer_id, x, self.reduce_arc, out_filters)
                                 # layer_id, layers, self.reduce_arc, out_filters)
                         else:
+                            x = self._factorized_reduction(x, out_filters, 2, is_training)
                             x = self._fixed_layer(
-                                layer_id, ilayer, self.reduce_arc, out_filters, 2, is_training,
+                                layer_id, x, self.reduce_arc, out_filters, 1, is_training,
                                 normal_or_reduction_cell="reduction")
                                 # layer_id, layers, self.reduce_arc, out_filters, 2, is_training,
                     logger.info("Layer {0:>2d}: {1}".format(layer_id, x))
@@ -401,14 +403,14 @@ class DagExecutor(Model):
                             hw = self._get_HW(aux_logits)
                             w = create_weight("w", [hw, hw, inp_c, 768])
                             aux_logits = tf.nn.conv2d(aux_logits, w, [1, 1, 1, 1], "SAME",
-                                                                                data_format=self.data_format)
+                                                      data_format=self.data_format)
                             aux_logits = batch_norm(aux_logits, is_training=True,
-                                                                            data_format=self.data_format)
+                                                    data_format=self.data_format)
                             aux_logits = tf.nn.relu(aux_logits)
 
                         with tf.variable_scope("fc"):
                             aux_logits = global_avg_pool(aux_logits,
-                                                                                     data_format=self.data_format)
+                                                         data_format=self.data_format)
                             inp_c = aux_logits.get_shape()[1].value
                             w = create_weight("w", [inp_c, 10])
                             aux_logits = tf.matmul(aux_logits, w)
@@ -424,8 +426,9 @@ class DagExecutor(Model):
             x = global_avg_pool(x, data_format=self.data_format)
             if is_training and self.keep_prob is not None and self.keep_prob < 1.0:
                 x = tf.nn.dropout(x, self.keep_prob)
+            logger.info(x)
             with tf.variable_scope("fc"):
-                inp_c = self._get_C(x)
+                inp_c = x.get_shape()[1].value
                 w = create_weight("w", [inp_c, 10])
                 x = tf.matmul(x, w)
         return x
@@ -458,22 +461,26 @@ class DagExecutor(Model):
 
         return x
 
-    def _fixed_combine(self, layers, used, out_filters, is_training,
+    def _fixed_combine(self, layers, ends, out_filters, is_training,
                                          normal_or_reduction_cell="normal"):
         """Adjust if necessary.
 
         Args:
             layers: a list of tf tensors of size [NHWC] of [NCHW].
-            used: a numpy tensor, [0] means not used.
+            ends: a numpy tensor, [1] means is an end.
         """
+        num_ends = tf.reduce_sum(ends)
+        possible_end_length = self.num_cells+1
+        at_least_one_end = tf.Assert(tf.greater(num_ends, 0), [ends,
+                                 'No end for this layer!!!'], 100)
 
         out_hw = min([self._get_HW(layer)
-                                    for i, layer in enumerate(layers) if used[i] == 0])
+                     for i, layer in enumerate(layers) if ends[i] == 1])
         out = []
 
         with tf.variable_scope("final_combine"):
             for i, layer in enumerate(layers):
-                if used[i] == 0:
+                if ends[i] == 1:
                     hw = self._get_HW(layer)
                     if hw > out_hw:
                         assert hw == out_hw * 2, ("i_hw={0} != {1}=o_hw".format(hw, out_hw))
@@ -490,47 +497,89 @@ class DagExecutor(Model):
             else:
                 raise ValueError("Unknown data_format '{0}'".format(self.data_format))
 
+        with tf.control_dependencies([at_least_one_end]):
+            with tf.variable_scope("final_conv"):
+                w = create_weight("w", [possible_end_length, out_filters * out_filters])
+                w = w[:num_ends]
+                # w = tf.gather(w, indices, axis=0)
+                w = tf.reshape(w, [1, 1, num_ends * out_filters, out_filters])
+                out = tf.nn.relu(out)
+                out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
+                                   data_format=self.data_format)
+                out = batch_norm(out, is_training=True, data_format=self.data_format)
+
+        # out = tf.reshape(out, tf.shape(prev_layers[0]))
+        out = tf.reshape(out, tf.shape(layers[0]))
+
         return out
 
-    def _fixed_layer(self, layer_id, prev_layers, arc, out_filters, stride,
+    def _fixed_layer(self, layer_id, pre_layer, arc, out_filters, stride,
                                      is_training, normal_or_reduction_cell="normal"):
+        logger.info("Arc {}".format(arc))
         """
         Args:
             prev_layers: cache of previous layers. for skip connections
             is_training: for batch_norm
         """
 
-        assert len(prev_layers) == 2
-        layers = [prev_layers[0], prev_layers[1]]
-        layers = self._maybe_calibrate_size(layers, out_filters,
-                                            is_training=is_training)
+        # assert len(prev_layers) == 2
+        # layers = [prev_layers[0], prev_layers[1]]
+        # layers = self._maybe_calibrate_size(layers, out_filters,
+        #                                     is_training=is_training)
+        layers = [pre_layer]
 
+        # What is this for?
         with tf.variable_scope("layer_base"):
-            x = layers[1]
+            x = layers[0]
             inp_c = self._get_C(x)
             w = create_weight("w", [1, 1, inp_c, out_filters])
             x = tf.nn.relu(x)
             x = tf.nn.conv2d(x, w, [1, 1, 1, 1], "SAME",
                                              data_format=self.data_format)
             x = batch_norm(x, is_training, data_format=self.data_format)
-            layers[1] = x
+            layers[0] = x
 
-        used = np.zeros([self.num_cells + 2], dtype=np.int32)
+        ends = np.zeros([self.num_cells + 1], dtype=np.int32)
         f_sizes = [3, 5]
         for cell_id in range(self.num_cells):
             with tf.variable_scope("cell_{}".format(cell_id)):
-                x_id = arc[4 * cell_id]
-                used[x_id] += 1
-                x_op = arc[4 * cell_id + 1]
-                x = layers[x_id]
-                x_stride = stride if x_id in [0, 1] else 1
+                start_idx = (self.cd_length) * cell_id
+                prev_idxs = arc[start_idx:start_idx+self.cd_opt_ind]
+                x_op = arc[start_idx+self.cd_opt_ind]
+                if arc[start_idx+self.cd_end_ind] == 1:
+                    ends[cell_id+1] = 1
+                link_layers = []
+                num_used_layers = self.num_cells-tf.size(tf.where(tf.equal(prev_idxs, 0)))
+                at_least_one = tf.Assert(tf.greater(num_used_layers, 0), [prev_idxs,
+                                         'No previous layer chosen!!!'], 100)
+
+                def _not_selected():
+                    return tf.zeros(shape=tf.shape(layers[0]),
+                                    dtype=tf.float32)
+
+                def _seleted(l):
+                    return l
+
+                for i in range(cell_id+1):
+                    slayer = tf.cond(tf.equal(prev_idxs[i], 0), _not_selected,
+                                     lambda: _seleted(layers[i]))
+                    link_layers.append(slayer)
+                layer_add_sum = tf.add_n(link_layers)
+                x = layer_add_sum
+                with tf.control_dependencies([at_least_one]):
+                    x = tf.divide(x, tf.to_float(num_used_layers))
+                # x_id = arc[4 * cell_id]
+                # used[x_id] += 1
+                # x_op = arc[4 * cell_id + 1]
+                # x = layers[x_id]
+                x_stride = stride
                 with tf.variable_scope("x_conv"):
-                    if x_op in [0, 1]:
-                        f_size = f_sizes[x_op]
+                    if x_op in [1, 2]:
+                        f_size = f_sizes[x_op-1]
                         x = self._fixed_conv(x, f_size, out_filters, x_stride, is_training)
-                    elif x_op in [2, 3]:
+                    elif x_op in [3, 4]:
                         inp_c = self._get_C(x)
-                        if x_op == 2:
+                        if x_op == 3:
                             x = tf.layers.average_pooling2d(
                                 x, [3, 3], [x_stride, x_stride], "SAME",
                                 data_format=self.actual_data_format)
@@ -559,51 +608,9 @@ class DagExecutor(Model):
                             is_training):
                         x = self._apply_drop_path(x, layer_id)
 
-                y_id = arc[4 * cell_id + 2]
-                used[y_id] += 1
-                y_op = arc[4 * cell_id + 3]
-                y = layers[y_id]
-                y_stride = stride if y_id in [0, 1] else 1
-                with tf.variable_scope("y_conv"):
-                    if y_op in [0, 1]:
-                        f_size = f_sizes[y_op]
-                        y = self._fixed_conv(y, f_size, out_filters, y_stride, is_training)
-                    elif y_op in [2, 3]:
-                        inp_c = self._get_C(y)
-                        if y_op == 2:
-                            y = tf.layers.average_pooling2d(
-                                y, [3, 3], [y_stride, y_stride], "SAME",
-                                data_format=self.actual_data_format)
-                        else:
-                            y = tf.layers.max_pooling2d(
-                                y, [3, 3], [y_stride, y_stride], "SAME",
-                                data_format=self.actual_data_format)
-                        if inp_c != out_filters:
-                            w = create_weight("w", [1, 1, inp_c, out_filters])
-                            y = tf.nn.relu(y)
-                            y = tf.nn.conv2d(y, w, [1, 1, 1, 1], "SAME",
-                                                             data_format=self.data_format)
-                            y = batch_norm(y, is_training, data_format=self.data_format)
-                    else:
-                        inp_c = self._get_C(y)
-                        if y_stride > 1:
-                            assert y_stride == 2
-                            y = self._factorized_reduction(y, out_filters, 2, is_training)
-                        if inp_c != out_filters:
-                            w = create_weight("w", [1, 1, inp_c, out_filters])
-                            y = tf.nn.relu(y)
-                            y = tf.nn.conv2d(y, w, [1, 1, 1, 1], "SAME",
-                                                             data_format=self.data_format)
-                            y = batch_norm(y, is_training, data_format=self.data_format)
-
-                    if (y_op in [0, 1, 2, 3] and
-                            self.drop_path_keep_prob is not None and
-                            is_training):
-                        y = self._apply_drop_path(y, layer_id)
-
-                out = x + y
+                out = x
                 layers.append(out)
-        out = self._fixed_combine(layers, used, out_filters, is_training,
+        out = self._fixed_combine(layers, ends, out_filters, is_training,
                                                             normal_or_reduction_cell)
 
         return out
@@ -851,8 +858,13 @@ class DagExecutor(Model):
         logger.info("Build train graph")
         tower_grads = []
         tower_grad_norm = []
-        for i in range(self.num_gpus):  # FLAGS.num_gpus
-            with tf.device('/gpu:%d' % i):
+        choose_pu = "/gpu"
+        num_pu = self.num_gpus
+        if self.num_gpus == 0:
+            choose_pu = "/cpu"
+            num_pu = self.num_cpus
+        for i in range(num_pu):  # FLAGS.num_gpus
+            with tf.device(choose_pu+':%d' % i):
                 logits = self._model(self.x_train, is_training=True)
                 log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
                     logits=logits, labels=self.y_train)
@@ -1002,11 +1014,16 @@ class DagExecutor(Model):
             # self.path_pool.append(self.path_arc)
         else:
             fixed_arc = np.array([int(x) for x in self.fixed_arc.split(" ") if x])
+            logger.info(fixed_arc)
             # fixed_arc.reshape()
-            self.dag_arc = fixed_arc
+            self.dag_arc = fixed_arc[:self.num_cells*self.cd_length]
+            self.reduce_arc = fixed_arc[self.num_cells*self.cd_length:]
 
         # with tf.variable_scope(tf.get_variable_scope()):
         self._build_train()
         self._build_valid()
-        self.build_valid_rl()
+        if self.fixed_arc is None:
+            self.build_valid_rl()
+        else:
+            self.valid_rl_acc = None
         self._build_test()

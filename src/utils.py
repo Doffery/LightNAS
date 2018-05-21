@@ -13,6 +13,31 @@ from operator import itemgetter
 user_flags = []
 
 
+def get_logger(name=__file__, level=logging.INFO):
+    logger = logging.getLogger(name)
+
+    if getattr(logger, '_init_done__', None):
+        logger.setLevel(level)
+        return logger
+
+    logger._init_done__ = True
+    logger.propagate = False
+    logger.setLevel(level)
+
+    formatter = logging.Formatter("%(asctime)s:%(levelname)s::%(message)s")
+    handler = logging.StreamHandler()
+    handler.setFormatter(formatter)
+    handler.setLevel(0)
+
+    del logger.handlers[:]
+    logger.addHandler(handler)
+
+    return logger
+
+
+logger = get_logger()
+
+
 def DEFINE_string(name, default_value, doc_string):
     tf.app.flags.DEFINE_string(name, default_value, doc_string)
     global user_flags
@@ -38,7 +63,7 @@ def DEFINE_boolean(name, default_value, doc_string):
 
 
 def print_user_flags(line_limit=80):
-    print("-" * 80)
+    logger.info("-" * 80)
  
     global user_flags
     FLAGS = tf.app.flags.FLAGS
@@ -48,7 +73,7 @@ def print_user_flags(line_limit=80):
         log_string = flag_name
         log_string += "." * (line_limit - len(flag_name) - len(value))
         log_string += value
-        print(log_string)
+        logger.info(log_string)
 
 
 def count_model_params(tf_variables):
@@ -75,31 +100,6 @@ def find_top_k_ind(data, k):
 def find_rtop_k_ind(data, k):
     ind_data = list(enumerate(data))
     return heapq.nsmallest(k, ind_data, key=itemgetter(1))
-
-
-def get_logger(name=__file__, level=logging.INFO):
-    logger = logging.getLogger(name)
-
-    if getattr(logger, '_init_done__', None):
-        logger.setLevel(level)
-        return logger
-
-    logger._init_done__ = True
-    logger.propagate = False
-    logger.setLevel(level)
-
-    formatter = logging.Formatter("%(asctime)s:%(levelname)s::%(message)s")
-    handler = logging.StreamHandler()
-    handler.setFormatter(formatter)
-    handler.setLevel(0)
-
-    del logger.handlers[:]
-    logger.addHandler(handler)
-
-    return logger
-
-
-logger = get_logger()
 
 def get_grads(
               loss,
