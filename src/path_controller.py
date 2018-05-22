@@ -90,22 +90,27 @@ class PathController:
             return [t[1] for t in sample_dict.items()]
 
         # dag_pool = []
-        path_pool = []
-        remain = self.path_pool_size * 2  # for both dag and reduce dag
-        for i in range(self.num_cells-2, self.num_cells):
+        path_bucket_pool = [[] for i in range(self.num_cells)]
+        path_bucket_pool_acc = [[] for i in range(self.num_cells)]
+        # path_pool = []
+        remain = self.path_pool_size  # * 2  # for both dag and reduce dag
+        for i in range(2, self.num_cells):
             length = i+1
             remain_each_length = remain // (self.num_cells-i)
             paths = _sample_path(length, remain_each_length)
             logger.info('Sampled {0} paths, length: {1}'.format(len(paths), length))
             for path in paths:
                 logger.info(path)
-                path_pool.append(path)
+                path_bucket_pool[i].append(path+path)  # same for dag and reduce
+                path_bucket_pool_acc[i].append(0.0)
+                # path_pool.append(path)
                 # dag_pool.append(self._path2dag(path))
                 remain -= 1
-        np.random.shuffle(path_pool)  # short path, long path mixed together
-        assert(len(path_pool) == self.path_pool_size*2)
-        path_pool_concat = np.reshape(path_pool, 
-                                      (self.path_pool_size, self.num_cells_double))
+        return path_bucket_pool, path_bucket_pool_acc
+        # np.random.shuffle(path_pool)  # short path, long path mixed together
+        # assert(len(path_pool) == self.path_pool_size*2)
+        # path_pool_concat = np.reshape(path_pool, 
+        #                               (self.path_pool_size, self.num_cells_double))
         # path_pool = [[1, 0, 3, 0, 2], [0, 0, 1, 0, 2]]
         # dag_pool = [  [1, 0, 0, 0, 0, 1, 0,
         #                 2, 0, 0, 0, 0, 0, 0,
@@ -119,7 +124,7 @@ class PathController:
         #                 0, 0, 0, 1, 0, 2, 1,
         #                 ]]
         # we better return both dag and path
-        return path_pool_concat  # , dag_pool
+        # return path_pool_concat  # , dag_pool
 
     def _init_pool(self, path_pool):
         path_pool = np.where(True, path_pool, -1)
@@ -151,7 +156,8 @@ class PathController:
         # random init a pool of paths
         # self.num_cells possible connections, +1 chosen ops
         # path_pool, dag_pool = self._init_pool_as_paths()
-        path_pool = self._init_pool_as_paths()
+        path_bucket_pool, path_bucket_pool_acc = self._init_pool_as_paths()
+        path_pool = np.concatenate(path_bucket_pool)
         path_pool_acc = np.zeros(shape=(self.path_pool_size), dtype=float)
        
         saver = tf.train.Saver(max_to_keep=2)
@@ -193,8 +199,10 @@ class PathController:
                 t_epoch_num = self.epoch + extra_epoch_num
                 while True:
                     for i in range(self.path_pool_size):
-                        feed_dict = {child_ops["dag_arc"]: self._path2dag(path_pool[i][:self.num_cells]),
-                                child_ops["reduce_arc"]: self._path2dag(path_pool[i][self.num_cells:])}
+                        feed_dict = {child_ops["dag_arc"]: self._path2dag(
+                                        path_pool[i][:self.num_cells]),
+                                     child_ops["reduce_arc"]: self._path2dag(
+                                        path_pool[i][self.num_cells:])}
                         if self.iteration % 100 == 1:
                             run_ops = [
                                     merged,
@@ -250,16 +258,20 @@ class PathController:
                             child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
 
                     if self.epoch >= t_epoch_num:
-                        for i in range(self.path_pool_size):
-                            feed_dict = {child_ops["dag_arc"]: self._path2dag(path_pool[i][:self.num_cells]),
-                                    child_ops["reduce_arc"]: self._path2dag(path_pool[i][self.num_cells:])}
-                            # feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
-                            valid_acc = sess.run(child_ops["valid_rl_acc"],
-                                                 feed_dict=feed_dict)
-                            path_pool_acc[i] = valid_acc
-
-                            logger.info("path_acc {0}: {1}".format(i, valid_acc))
                         break
+
+            for i in range(self.num_cells):
+                for j in range(len(path_bucket_pool[i])):
+                    feed_dict = {child_ops["dag_arc"]: self._path2dag(
+                        path_bucket_pool[i][j][:self.num_cells]),
+                            child_ops["reduce_arc"]: self._path2dag(
+                                path_bucket_pool[i][j][self.num_cells:])}
+                    # feed_dict = {child_ops["dag_arc"]: dag_pool[i]}
+                    valid_acc = sess.run(child_ops["valid_rl_acc"],
+                                         feed_dict=feed_dict)
+                    path_bucket_pool_acc[i][j] = valid_acc
+
+                    logger.info("path_acc {0} {1}: {2}".format(i, j, valid_acc))
 
             logger.info("Start init the pool and cal valid_acc")
             _train_it(FLAGS.num_epochs)
@@ -277,6 +289,9 @@ class PathController:
                     if (p == path).all():
                         return False
                 return True
+
+            def _path_length(path):
+                return self.num_cells
 
             # start evolving
             logger.info("Start evolving...")
@@ -324,6 +339,7 @@ class PathController:
                                                              candidate_paths):
                                     candidate_paths.append(cpath)
 
+                candidate_path_buckets = [[] for ir in range(self.num_cells)]
                 # predict and select best k
                 logger.info("Candidate Paths: {0}".format(candidate_paths))
                 candidate_accs = []
@@ -336,37 +352,46 @@ class PathController:
                                          feed_dict=feed_dict)
                     logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
                     # child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
-                    candidate_accs.append(valid_acc)
+                    bucket_ind = _path_length(cpath)
+                    candidate_path_buckets[bucket_ind].append(cpath)
+                    candidate_bucket_accs[bucket_ind].append(valid_acc)
+                    # candidate_accs.append(valid_acc)
 
-                top_k_candidates = utils.find_top_k_ind(candidate_accs,
-                                                        self.k_best_selection)
-                logger.info("Top K Candidates: {0}".format(top_k_candidates))
+                for bind in range(self.num_cells):
+                    b_path_pool = path_bucket_pool[bind]
+                    b_path_pool_acc = path_bucket_pool_acc[bind]
+                    top_k_candidates = utils.find_top_k_ind(candidate_bucket_accs[bind],
+                                                            self.k_best_selection)
+                    logger.info("B {0} Top K Candidates: {1}".format(bind, 
+                        top_k_candidates))
 
-                # replace the worse with candidates
-                for tk_ind, tk_acc in top_k_candidates:
-                    path_pool = np.append(path_pool, [candidate_paths[tk_ind]], axis=0)
-                    path_pool_acc = np.append(path_pool_acc, [tk_acc])
-                bad_k_paths = utils.find_rtop_k_ind(path_pool_acc,
-                                                    len(top_k_candidates))
-                                                    # self.k_best_selection)
-                logger.info("Removing: {0}".format(bad_k_paths))
-                del_inx = [ind for ind, _ in bad_k_paths]
-                # del_inx.sort(reverse=True)
-                # for d_ind in del_inx:
-                #     del path_pool[d_ind]
-                #     del path_pool_acc[d_ind]
-                tmp_path_pool = []
-                # tmp_dag_pool = []
-                tmp_path_pool_acc = []
-                for ind in range(len(path_pool)):
-                    if ind not in del_inx:
-                        tmp_path_pool.append(path_pool[ind])
-                        # tmp_dag_pool.append(self._path2dag(path_pool[ind]))
-                        tmp_path_pool_acc.append(path_pool_acc[ind])
-                path_pool = np.array(tmp_path_pool)
-                # dag_pool = np.array(tmp_dag_pool)
-                path_pool_acc = np.array(tmp_path_pool_acc)
+                    # replace the worse with candidates
+                    for tk_ind, tk_acc in top_k_candidates:
+                        b_path_pool = np.append(b_path_pool, 
+                                [candidate_path_buckets[tk_ind]], axis=0)
+                        b_path_pool_acc = np.append(b_path_pool_acc, [tk_acc])
+                    bad_k_paths = utils.find_rtop_k_ind(b_path_pool_acc,
+                                                        len(top_k_candidates))
+                                                        # self.k_best_selection)
+                    logger.info("Removing: {0}".format(bad_k_paths))
+                    del_inx = [ind for ind, _ in bad_k_paths]
+                    # del_inx.sort(reverse=True)
+                    # for d_ind in del_inx:
+                    #     del path_pool[d_ind]
+                    #     del path_pool_acc[d_ind]
+                    tmp_path_pool = []
+                    # tmp_dag_pool = []
+                    tmp_path_pool_acc = []
+                    for ind in range(len(b_path_pool)):
+                        if ind not in del_inx:
+                            tmp_path_pool.append(b_path_pool[ind])
+                            # tmp_dag_pool.append(self._path2dag(path_pool[ind]))
+                            tmp_path_pool_acc.append(b_path_pool_acc[ind])
+                    path_bucket_pool[bind] = np.array(tmp_path_pool)
+                    # dag_pool = np.array(tmp_dag_pool)
+                    path_bucket_pool_acc[bind] = np.array(tmp_path_pool_acc)
 
+                path_pool = np.concatenate(path_bucket_pool)
                 if evolve_iter % FLAGS.train_every_generations == 0:
                     logger.info("Train evolving iteration {}".format(evolve_iter))
                     _train_it(FLAGS.num_epochs_evolve)
