@@ -20,6 +20,7 @@ logger = utils.logger
 class PathController:
     def __init__(self,
                  num_cells,
+                 num_layers=2,
                  cd_length,
                  opt_num,
                  path_pool_size,
@@ -30,6 +31,7 @@ class PathController:
         logger.info('Start building controller')
         self.num_cells = num_cells
         self.num_cells_double = num_cells * 2
+        self.num_layers = num_layers
         self.cd_length = cd_length
         self.cd_opt_ind = self.cd_length-2
         self.cd_end_ind = self.cd_length-1
@@ -260,6 +262,10 @@ class PathController:
                     if self.epoch >= t_epoch_num:
                         break
 
+            logger.info("Start init the pool and cal valid_acc")
+            _train_it(FLAGS.num_epochs)
+            logger.info("Finish init the path pool")
+
             for i in range(self.num_cells):
                 for j in range(len(path_bucket_pool[i])):
                     feed_dict = {child_ops["dag_arc"]: self._path2dag(
@@ -272,10 +278,8 @@ class PathController:
                     path_bucket_pool_acc[i][j] = valid_acc
 
                     logger.info("path_acc {0} {1}: {2}".format(i, j, valid_acc))
+            path_pool_acc = path_bucket_pool_acc.flatten()
 
-            logger.info("Start init the pool and cal valid_acc")
-            _train_it(FLAGS.num_epochs)
-            logger.info("Finish init the path pool")
 
 
             def _is_new_path(path):
@@ -290,8 +294,18 @@ class PathController:
                         return False
                 return True
 
+            # Notice that, the identiy layer not counted as valid length
             def _path_length(path):
-                return self.num_cells
+                num_dag_cell = 0
+                num_reduce_cell = 0
+                for i in range(self.num_cells):
+                    if path[i] in range(1, self.opt_num):
+                        num_dag_cell += 1
+                for i in range(self.num_cells, self.num_cells_double):
+                    if path[i] in range(1, self.opt_num):
+                        num_reduce_cell += 1
+                return (num_dag_cell*(self.num_layers-2)+ \
+                        num_reduce_cell*2)/self.num_layers
 
             # start evolving
             logger.info("Start evolving...")
@@ -302,17 +316,19 @@ class PathController:
                 logger.info("Evolving {0}:".format(evolve_iter))
                 logger.info("Pathes: {0}".format(list(enumerate(path_pool))))
                 logger.info("Pathes acc: {0}".format(list(enumerate(path_pool_acc))))
-                top_k_ind_acc = utils.find_top_k_ind(path_pool_acc,
-                                                     self.k_init_selection)
-                logger.info("Select top K seeds: {0}".format(top_k_ind_acc))
-                seeds = [x for x, _ in top_k_ind_acc]
+                seeds = []
+                for i in range(self.num_cells):
+                    top_k_ind_acc = utils.find_top_k_ind(path_bucket_pool_acc[i],
+                                                         self.k_init_selection)
+                    logger.info("Select top K seeds {0}: {1}".format(i, top_k_ind_acc))
+                    seeds.extend([(i, x) for x, _ in top_k_ind_acc])
                 candidate_paths = []
 
                 # apply mutation
                 for ind in seeds:
                     for i in range(self.num_cells_double):
                         for j in range(1, self.opt_num+1):
-                            tmp_path = np.copy(path_pool[ind])
+                            tmp_path = np.copy(path_bucket_pool[ind[0]][ind[1]])
                             # tmp = tmp_path[i]
                             tmp_path[i] = j  # np.random.randint(0, self.opt_num+1)
                             if self._check_path(tmp_path) and \
@@ -392,6 +408,7 @@ class PathController:
                     path_bucket_pool_acc[bind] = np.array(tmp_path_pool_acc)
 
                 path_pool = np.concatenate(path_bucket_pool)
+                path_pool_acc = np.concatenate(path_bucket_pool_acc)
                 if evolve_iter % FLAGS.train_every_generations == 0:
                     logger.info("Train evolving iteration {}".format(evolve_iter))
                     _train_it(FLAGS.num_epochs_evolve)
@@ -457,6 +474,7 @@ class PathController:
                 (self.num_cells, self.cd_length))))
             logger.info("Merge reduce dag{}".format(np.reshape(final_dag_reduce,
                 (self.num_cells, self.cd_length))))
+            # Choose the best is not always a good idea?
             final_acc = path_pool_acc[sort_acc[0][0]]
             while being_better:
                 choose_dag = final_dag

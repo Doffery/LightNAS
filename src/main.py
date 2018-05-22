@@ -184,6 +184,7 @@ def train():
         child_ops = ops["child"]
         pc = path_controller.PathController(
                 num_cells=FLAGS.child_num_cells,
+                num_layers=FLAGS.child_num_layers,
                 cd_length=FLAGS.child_num_cells+2,
                 opt_num=FLAGS.opt_num,
                 path_pool_size=FLAGS.path_pool_size,
