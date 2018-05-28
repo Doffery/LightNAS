@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 logger = utils.logger
 
