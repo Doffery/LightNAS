@@ -24,7 +24,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
 
 logger = utils.logger
 
@@ -74,8 +74,8 @@ DEFINE_integer("cd_length", 7, "cell_descriptor_length")
 DEFINE_boolean("controller_search_whole_channels", False, "")
 DEFINE_integer("opt_num", 5, "num of ops can be selected")
 DEFINE_integer("path_pool_size", 10, "")
-DEFINE_integer("k_init_selection_num", 5, "")
-DEFINE_integer("k_best_selection_num", 5, "")
+DEFINE_integer("k_init_selection_num", 2, "")
+DEFINE_integer("k_best_selection_num", 2, "")
 DEFINE_integer("max_generation", 50, "")
 
 DEFINE_integer("train_every_generations", 5, "train again after n generations")

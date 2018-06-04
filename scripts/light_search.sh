@@ -10,21 +10,21 @@ python src/main.py \
   --output_dir="outputs" \
   --summaries_dir="log/log" \
   --batch_size=160 \
-  --num_gpus=1 \
+  --num_gpus=2 \
   --path_pool_size=20 \
-  --num_epochs=0 \
-  --num_epochs_evolve=1 \
+  --num_epochs=3 \
+  --num_epochs_evolve=3 \
   --log_every=50 \
   --eval_every=23 \
   --eval_every_epochs=1 \
-  --max_generation=150 \
+  --max_generation=60 \
   --train_every_generations=5 \
   --child_use_aux_heads \
   --child_num_layers=6 \
   --child_out_filters=20 \
   --child_l2_reg=1e-4 \
   --child_num_branches=5 \
-  --child_num_cells=5 \
+  --child_num_cells=8 \
   --child_keep_prob=0.90 \
   --child_drop_path_keep_prob=0.60 \
   --child_lr_cosine \

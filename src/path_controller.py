@@ -10,6 +10,8 @@ import random
 import numpy as np
 import tensorflow as tf
 import utils
+import math
+from scipy.special import comb
 
 
 flags = tf.app.flags
@@ -47,10 +49,17 @@ class PathController:
         logger.info('Sample a path arc')
         return tf.random_normal([1, 3], mean=-1, stddev=4)
 
+
     def _check_path(self, path):
-        # return path.tolist().count(0) < self.num_cells-1
-        return path[:self.num_cells].tolist().count(0) < self.num_cells-1 and \
-                path[self.num_cells:].tolist().count(0) < self.num_cells-1
+        return_val = True
+        if path.tolist().count(1) == 0 and \
+                path.tolist().count(2) == 0:
+            return_val = False
+        return return_val
+
+    def _check_path_double(self, path):
+        return self._check_path(path[:self.num_cells]) and \
+                self._check_path(path[self.num_cells:])
 
     def _path2dag(self, path):
         opt_ind = self.cd_opt_ind
@@ -66,7 +75,7 @@ class PathController:
                 dag[start_idx+opt_ind-self.num_cells+pre_op_idx+1] = 1
                 if pre_op_idx != -1:
                     dag[(pre_op_idx+1)*self.cd_length-1] = 0
-                    dag[start_idx+end_ind] = 1
+                dag[start_idx+end_ind] = 1
                 pre_op_idx = i
         # logger.info(path)
         # logger.info(np.reshape(dag, (self.num_cells, self.cd_length)))
@@ -76,8 +85,9 @@ class PathController:
     def _init_pool_as_paths(self):
         # path_pool = np.where(True, path_pool, -1)
         def _sample_path(length, num):
-            if self.num_cells*length*2 <= num:
-                num = self.num_cells*length*2
+            c = int(comb(self.num_cells, length)*math.pow(self.opt_num-2, length))
+            if c <= num:
+                num = c
                 return _sample_path(length, num)
             sample_dict = {}
             while num:
@@ -85,6 +95,7 @@ class PathController:
                 path = np.zeros(self.num_cells, dtype=np.int32)
                 for ind in sample_ind:
                     path[ind] = random.randint(1, self.opt_num-1)  # no identity
+                path[sample_ind[0]] = random.randint(1, 3)
                 path_str = np.array2string(path)
                 if path_str not in sample_dict and self._check_path(path):
                     sample_dict[path_str] = path
@@ -96,14 +107,14 @@ class PathController:
         path_bucket_pool_acc = [[] for i in range(self.num_cells)]
         # path_pool = []
         remain = self.path_pool_size  # * 2  # for both dag and reduce dag
-        for i in range(2, self.num_cells):
+        for i in range(1, self.num_cells-2):  # -1
             length = i+1
-            remain_each_length = remain // (self.num_cells-i)
+            remain_each_length = remain // (self.num_cells-i-2)  # -1
             paths = _sample_path(length, remain_each_length)
             logger.info('Sampled {0} paths, length: {1}'.format(len(paths), length))
             for path in paths:
                 logger.info(path)
-                path_bucket_pool[i].append(np.concatenate([path, path]))  # same for dag and reduce
+                path_bucket_pool[i].append(np .concatenate([path, path]))  # same for dag and reduce
                 path_bucket_pool_acc[i].append(0.0)
                 # path_pool.append(path)
                 # dag_pool.append(self._path2dag(path))
@@ -185,7 +196,7 @@ class PathController:
         # for var in tf.trainable_variables():
         #     print(var)
         with tf.train.SingularMonitoredSession(
-          config=config, hooks=hooks, checkpoint_dir=FLAGS.output_dir) as sess:
+          config=config) as sess:
         # with tf.Session() as sess:
             train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
                                                  sess.graph)
@@ -198,14 +209,20 @@ class PathController:
             self.iteration = 0
             self.epoch = 0
 
-            def _train_it(extra_epoch_num):
-                t_epoch_num = self.epoch + extra_epoch_num
+            def _train_it_path(extra_epoch_num, train_path_pool):
+                _train_it(extra_epoch_num,
+                          [(self._path2dag(path[:self.num_cells]),
+                              self._path2dag(path[self.num_cells:])) \
+                                    for path in train_path_pool])
+
+            def _train_it(extra_epoch_num, train_pool):
+                t_step_num = self.iteration + \
+                    int(extra_epoch_num*child_ops["num_train_batches"])
+                # t_epoch_num = self.epoch + extra_epoch_num
                 while True:
-                    for i in range(self.path_pool_size):
-                        feed_dict = {child_ops["dag_arc"]: self._path2dag(
-                                        path_pool[i][:self.num_cells]),
-                                     child_ops["reduce_arc"]: self._path2dag(
-                                        path_pool[i][self.num_cells:])}
+                    for i in range(len(train_pool)):
+                        feed_dict = {child_ops["dag_arc"]: train_pool[i][0],
+                                     child_ops["reduce_arc"]: train_pool[i][1]}
                         if self.iteration % 100 == 1:
                             run_ops = [
                                     merged,
@@ -260,11 +277,11 @@ class PathController:
                                 child_ops["eval_func"](sess, "valid", feed_dict=feed_dict)
                             child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
 
-                    if self.epoch >= t_epoch_num:
+                    if self.iteration >= t_step_num:
                         break
 
             logger.info("Start init the pool and cal valid_acc")
-            _train_it(FLAGS.num_epochs)
+            _train_it_path(FLAGS.num_epochs, path_pool)
             logger.info("Finish init the path pool")
 
             for i in range(self.num_cells):
@@ -302,10 +319,10 @@ class PathController:
                 num_dag_cell = 0
                 num_reduce_cell = 0
                 for i in range(self.num_cells):
-                    if path[i] in range(1, self.opt_num):
+                    if path[i] in range(1, 3):
                         num_dag_cell += 1
                 for i in range(self.num_cells, self.num_cells_double):
-                    if path[i] in range(1, self.opt_num):
+                    if path[i] in range(1, 3):
                         num_reduce_cell += 1
                 return int((num_dag_cell*(self.num_layers-2)+ \
                         num_reduce_cell*2)/self.num_layers - 0.001)
@@ -334,7 +351,7 @@ class PathController:
                             tmp_path = np.copy(path_bucket_pool[ind[0]][ind[1]])
                             # tmp = tmp_path[i]
                             tmp_path[i] = j  # np.random.randint(0, self.opt_num+1)
-                            if self._check_path(tmp_path) and \
+                            if self._check_path_double(tmp_path) and \
                                     _is_new_path(tmp_path) and \
                                     _is_new_path_in_pool(tmp_path, candidate_paths):
                                 candidate_paths.append(tmp_path)
@@ -348,18 +365,22 @@ class PathController:
                 # apply crossover
                 top_k_path_acc = utils.find_top_k_ind(path_pool_acc,
                                                       self.k_init_selection)
-                for ind1 in range(len(path_pool)-1):
-                    for ind2 in range(ind1+1, len(path_pool)):
+                for ind1 in range(len(top_k_path_acc)-1):
+                    for ind2 in range(ind1+1, len(top_k_path_acc)):
+                        pi1 = top_k_path_acc[ind1][0]
+                        pi2 = top_k_path_acc[ind2][0]
                         for point in range(1, self.num_cells_double):
-                            cpath1, cpath2 = _crossover(path_pool[ind1],
-                                                        path_pool[ind2], point)
+                            cpath1, cpath2 = _crossover(path_pool[pi1],
+                                                        path_pool[pi2], point)
                             for cpath in [cpath1, cpath2]:
-                                if self._check_path(cpath) and \
+                                if self._check_path_double(cpath) and \
                                         _is_new_path(cpath) and \
                                         _is_new_path_in_pool(cpath,
                                                              candidate_paths):
                                     candidate_paths.append(cpath)
 
+                # _train_it_path(1, candidate_paths)
+                train_cand_set = []
                 candidate_path_buckets = [[] for ir in range(self.num_cells)]
                 # predict and select best k
                 logger.info("Candidate Paths: {0}".format(candidate_paths))
@@ -385,11 +406,12 @@ class PathController:
                                                             self.k_best_selection)
                     logger.info("B {0} Top K Candidates: {1}".format(bind, 
                         top_k_candidates))
-                    logger.info(b_path_pool)
-                    logger.info(candidate_path_buckets[bind])
+                    # logger.info(b_path_pool)
+                    # logger.info(candidate_path_buckets[bind])
 
                     # replace the worse with candidates
                     for tk_ind, tk_acc in top_k_candidates:
+                        train_cand_set.append(candidate_path_buckets[bind][tk_ind])
                         if len(b_path_pool) == 0:
                             path_bucket_pool[bind] = [candidate_path_buckets[bind][tk_ind]]
                         else:
@@ -417,12 +439,14 @@ class PathController:
                     # dag_pool = np.array(tmp_dag_pool)
                     path_bucket_pool_acc[bind] = np.array(tmp_path_pool_acc)
 
+                _train_it_path(0.5, train_cand_set)
+
                 path_pool = np.concatenate([p for p in path_bucket_pool if p!=[]])
                 path_pool_acc = np.concatenate([pc for pc in path_bucket_pool_acc if pc!=[]])
-                if evolve_iter % FLAGS.train_every_generations == 0:
-                    logger.info("Train evolving iteration {}".format(evolve_iter))
-                    _train_it(FLAGS.num_epochs_evolve)
-                logger.info("Finish evolving iteration {}".format(evolve_iter))
+                # if evolve_iter % FLAGS.train_every_generations == 0:
+                #     logger.info("Train evolving iteration {}".format(evolve_iter))
+                #     _train_it(FLAGS.num_epochs_evolve)
+                # logger.info("Finish evolving iteration {}".format(evolve_iter))
 
             logger.info("Final Pathes: {0}".format(list(enumerate(path_pool))))
             logger.info("Final Pathes acc: {0}".format(list(enumerate(path_pool_acc))))
@@ -485,7 +509,7 @@ class PathController:
             logger.info("Merge reduce dag{}".format(np.reshape(final_dag_reduce,
                 (self.num_cells, self.cd_length))))
             # Choose the best is not always a good idea?
-            final_acc = path_pool_acc[sort_acc[0][0]]
+            final_acc = path_pool_acc[sort_acc[10][0]]
             while being_better:
                 choose_dag = final_dag
                 choose_dag_reduce = final_dag_reduce
@@ -499,6 +523,7 @@ class PathController:
                             self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
                     tmp_dag_reduce = _merge_dag(final_dag_reduce,
                             self._path2dag(path_pool[sort_acc[ind][0]][self.num_cells:]))
+                    _train_it(0.5, [(tmp_dag, tmp_dag_reduce)])
                     # feed_dict = {child_ops["dag_arc"]: tmp_dag}
                     feed_dict = {child_ops["dag_arc"]: tmp_dag,
                             child_ops["reduce_arc"]: tmp_dag_reduce}
