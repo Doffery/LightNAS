@@ -852,6 +852,109 @@ class DagExecutor(Model):
         out = tf.reshape(out, tf.shape(prev_layer))
         return out
 
+
+    def _enas_layer_path(self, layer_id, prev_layer, path, out_filters):
+        """
+        Args:
+            layer_id: current layer
+            prev_layers: cache of previous layers. for skip connections
+            start_idx: where to start looking at. technically, we can infer this
+                from layer_id, but why bother...
+        """
+
+        # assert len(prev_layers) == 2, "need exactly 2 inputs"
+        # layers = [prev_layers[0], prev_layers[1]]
+        # layers = self._maybe_calibrate_size(layers, out_filters, is_training=True)
+        layers = [prev_layer]
+        used = []
+        possible_end_length = self.num_cells+1
+        for cell_id in range(self.num_cells):
+            prev_layers = layers
+            # prev_layers = tf.stack(layers, axis=0)
+            with tf.variable_scope("cell_{0}".format(cell_id)):
+                # with tf.variable_scope("x"):
+                # x_id = arc[2 * cell_id]
+                # x_op = arc[2 * cell_id + 1]
+                # x = prev_layers[x_id, :, :, :, :]
+                # x = self._enas_cell(x, cell_id, x_id, x_op, out_filters)
+                start_idx = cell_id
+                for ind in range(cell_id):
+                    pre_list = tf.cond(tf.equal(path[start_idx], 0),
+                            lambda: tf.zeros([possible_end_length], tf.int32))
+                x = self._enas_dag_cell(prev_layers, cell_id,
+                                    arc[start_idx:start_idx+self.cd_opt_ind],
+                                    arc[start_idx], out_filters)
+                # x_used = tf.one_hot(x_id, depth=self.num_cells + 2, dtype=tf.int32)
+                x_used = tf.cond(tf.equal(arc[start_idx+self.cd_end_ind], 0),
+                        lambda: tf.zeros([possible_end_length], tf.int32),
+                        lambda: tf.one_hot(cell_id+1, depth=possible_end_length,
+                                            dtype=tf.int32))
+
+                # with tf.variable_scope("y"):
+                #     y_id = arc[4 * cell_id + 2]
+                #     y_op = arc[4 * cell_id + 3]
+                #     y = prev_layers[y_id, :, :, :, :]
+                #     y = self._enas_cell(y, cell_id, y_id, y_op, out_filters)
+                #     y_used = tf.one_hot(y_id, depth=self.num_cells + 2, dtype=tf.int32)
+
+                # out = x + y
+                # used.extend([x_used, y_used])
+                # layers.append(out)
+                used.append(x_used)
+                layers.append(x)
+        # out = x
+
+        tf.summary.tensor_summary('used', used)
+        used = tf.add_n(used)
+        # used = tf.Print(used, [used], 'Used: ', summarize=100)
+
+        '''
+        dag2d = tf.reshape(self.dag_arc, [self.num_cells, self.num_cells+1])
+        used = tf.slice(dag2d, [0, 0], [self.num_cells, 0])
+        '''
+
+        indices = tf.where(tf.equal(used, 1))
+        indices = tf.to_int32(indices)
+        indices = tf.reshape(indices, [-1])
+        num_outs = tf.size(indices)
+        out = tf.stack(layers, axis=0)
+        out = tf.gather(out, indices, axis=0)
+
+        at_least_one_end = tf.Assert(tf.greater(num_outs, 0), 
+                                     [num_outs, indices])  # at least one
+
+        inp = prev_layer
+        if self.data_format == "NHWC":
+            N = tf.shape(inp)[0]
+            H = tf.shape(inp)[1]
+            W = tf.shape(inp)[2]
+            C = tf.shape(inp)[3]
+            out = tf.transpose(out, [1, 2, 3, 0, 4])
+            out = tf.reshape(out, [N, H, W, num_outs * out_filters])
+        elif self.data_format == "NCHW":
+            N = tf.shape(inp)[0]
+            C = tf.shape(inp)[1]
+            H = tf.shape(inp)[2]
+            W = tf.shape(inp)[3]
+            out = tf.transpose(out, [1, 0, 2, 3, 4])
+            out = tf.reshape(out, [N, num_outs * out_filters, H, W])
+        else:
+            raise ValueError("Unknown data_format '{0}'".format(self.data_format))
+
+        with tf.control_dependencies([at_least_one_end]):
+            with tf.variable_scope("final_conv"):
+                w = create_weight("w", [possible_end_length, out_filters * out_filters])
+                w = tf.gather(w, indices, axis=0)
+                w = tf.reshape(w, [1, 1, num_outs * out_filters, out_filters])
+                out = tf.nn.relu(out)
+                out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
+                                   data_format=self.data_format)
+                out = batch_norm(out, is_training=True, data_format=self.data_format)
+
+        # out = tf.reshape(out, tf.shape(prev_layers[0]))
+        out = tf.reshape(out, tf.shape(prev_layer))
+        return out
+
     # override
     def _build_train(self):
         logger.info("-" * 80)
@@ -989,41 +1092,41 @@ class DagExecutor(Model):
                              tf.to_float(self.batch_size))
         
 
-    def initialize(self):
-        # if self.fixed_arc is None:
-        #     self.normal_arc, self.reduce_arc = controller_model.sample_arc
-        # else:
-        #     fixed_arc = np.array([int(x) for x in self.fixed_arc.split(" ") if x])
-        #     self.normal_arc = fixed_arc[:4 * self.num_cells]
-        #     self.reduce_arc = fixed_arc[4 * self.num_cells:]
-        # self.path_arc = tf.placeholder(tf.int32, shape=(5))
+    def initialize(self, generator_model):
         if self.fixed_arc is None:
-            # self.path_arc = tf.placeholder(tf.int32, shape=(self.num_cells))
-            self.dag_arc = tf.placeholder(tf.int32, shape=(
-                                          self.num_cells*self.cd_length))
-            self.reduce_arc = tf.placeholder(tf.int32, shape=(
-                                          self.num_cells*(self.cd_length)))
-            self.dag_arc = tf.Print(self.dag_arc, [self.dag_arc],
-                                    'dag_arc: ', summarize=100)
-            self.reduce_arc = tf.Print(self.reduce_arc, [self.reduce_arc],
-                                       'reduce_arc: ', summarize=100)
-            # self.dag_end_points = tf.placeholder(tf.int32, shape=(
-            #                               self.num_cells+1))
-            # self.path_arc = controller_model.sample_path_arc
-            # self.path_pool = []
-            # self.path_pool.append(self.path_arc)
+            self.normal_arc, self.reduce_arc = generator_model.sample_arc
         else:
             fixed_arc = np.array([int(x) for x in self.fixed_arc.split(" ") if x])
-            logger.info(fixed_arc)
-            # fixed_arc.reshape()
-            self.dag_arc = fixed_arc[:self.num_cells*self.cd_length]
-            self.reduce_arc = fixed_arc[self.num_cells*self.cd_length:]
+            self.normal_arc = fixed_arc[:self.cd_length * self.num_cells]
+            self.reduce_arc = fixed_arc[self.cd_length * self.num_cells:]
+        # self.path_arc = tf.placeholder(tf.int32, shape=(5))
+        # if self.fixed_arc is None:
+        #     # self.path_arc = tf.placeholder(tf.int32, shape=(self.num_cells))
+        #     self.dag_arc = tf.placeholder(tf.int32, shape=(
+        #                                   self.num_cells*self.cd_length))
+        #     self.reduce_arc = tf.placeholder(tf.int32, shape=(
+        #                                   self.num_cells*(self.cd_length)))
+        #     self.dag_arc = tf.Print(self.dag_arc, [self.dag_arc],
+        #                             'dag_arc: ', summarize=100)
+        #     self.reduce_arc = tf.Print(self.reduce_arc, [self.reduce_arc],
+        #                                'reduce_arc: ', summarize=100)
+        #     # self.dag_end_points = tf.placeholder(tf.int32, shape=(
+        #     #                               self.num_cells+1))
+        #     # self.path_arc = controller_model.sample_path_arc
+        #     # self.path_pool = []
+        #     # self.path_pool.append(self.path_arc)
+        # else:
+        #     fixed_arc = np.array([int(x) for x in self.fixed_arc.split(" ") if x])
+        #     logger.info(fixed_arc)
+        #     # fixed_arc.reshape()
+        #     self.dag_arc = fixed_arc[:self.num_cells*self.cd_length]
+        #     self.reduce_arc = fixed_arc[self.num_cells*self.cd_length:]
 
         # with tf.variable_scope(tf.get_variable_scope()):
         self._build_train()
         self._build_valid()
-        if self.fixed_arc is None:
-            self.build_valid_rl()
-        else:
-            self.valid_rl_acc = None
+        # if self.fixed_arc is None:
+        #     self.build_valid_rl()
+        # else:
+        #     self.valid_rl_acc = None
         self._build_test()

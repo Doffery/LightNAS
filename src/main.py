@@ -19,6 +19,7 @@ from utils import print_user_flags
 from path_controller import PathController
 from path_generator import PathGenerator
 from dag_executor import DagExecutor
+from dag_generator import DagGenerator
 import data_utils
 from data_utils import read_data
 
@@ -137,7 +138,29 @@ def get_ops(images, labels):
       num_replicas=FLAGS.child_num_replicas,
     )
 
-    child_model.initialize()
+    generator_model = DagGenerator(
+        num_cells=FLAGS.child_num_cells,
+        num_branches=FLAGS.child_num_branches,
+        lstm_size=64,
+        lstm_num_layers=1,
+        lstm_keep_prob=1.0,
+        tanh_constant=FLAGS.controller_tanh_constant,
+        op_tanh_reduce=FLAGS.controller_op_tanh_reduce,
+        temperature=FLAGS.controller_temperature,
+        lr_init=FLAGS.controller_lr,
+        lr_dec_start=0,
+        lr_dec_every=1000000,  # never decrease learning rate
+        l2_reg=FLAGS.controller_l2_reg,
+        entropy_weight=FLAGS.controller_entropy_weight,
+        bl_dec=FLAGS.controller_bl_dec,
+        use_critic=FLAGS.controller_use_critic,
+        optim_algo="adam",
+        sync_replicas=FLAGS.controller_sync_replicas,
+        num_aggregate=FLAGS.controller_num_aggregate,
+        num_replicas=FLAGS.controller_num_replicas)
+
+    child_model.initialize(generator_model)
+    generator_model.build_trainer(child_model)
     # controller_model.build_trainer(child_model)
 
     child_ops = {
@@ -157,9 +180,26 @@ def get_ops(images, labels):
       # "eval_every": child_model.num_train_batches * FLAGS.eval_every_epochs,
       "eval_func": child_model.eval_once,
     }
- 
+
+    generator_ops = {
+      "train_step": generator_model.train_step,
+      "loss": generator_model.loss,
+      "train_op": generator_model.train_op,
+      "lr": generator_model.lr,
+      "grad_norm": generator_model.grad_norm,
+      "valid_acc": generator_model.valid_acc,
+      "optimizer": generator_model.optimizer,
+      "baseline": generator_model.baseline,
+      "entropy": generator_model.sample_entropy,
+      "conv_ops":generator_model.conv_ops,
+      "reduce_ops":generator_model.reduce_ops,
+      "sample_arc": generator_model.sample_arc,
+      "skip_rate": generator_model.skip_rate,
+    }
+
     ops = {
       "child": child_ops,
+      "generator": generator_ops,
       # "controller": controller_ops,
       # "eval_every": child_model.num_train_batches * FLAGS.eval_every_epochs,
       # "eval_func": child_model.eval_once,
@@ -182,7 +222,9 @@ def train():
     with g.as_default():
         ops = get_ops(images, labels)
         child_ops = ops["child"]
-        pc = path_controller.PathController(
+        generator_ops = ops["generator"]
+
+        dc = DagController(
                 num_cells=FLAGS.child_num_cells,
                 num_layers=FLAGS.child_num_layers,
                 cd_length=FLAGS.child_num_cells+2,
@@ -191,12 +233,27 @@ def train():
                 k_init_selection_num=FLAGS.k_init_selection_num,
                 k_best_selection_num=FLAGS.k_best_selection_num,
                 max_generation=FLAGS.max_generation)
-        # pc.build_path_pool_out_tensor(child_ops)
-        # pc.build_path_pool(10)
         if FLAGS.child_fixed_arc is None:
-            pc.build_path_pool_full_arc(child_ops)
+            dc.evolve_ops_dag(child_ops, generator_ops)
         else:
-            pc.eval_dag_arc(child_ops)
+            dc.eval_dag_arc(child_ops)
+
+        # pc = PathController(
+        #         num_cells=FLAGS.child_num_cells,
+        #         num_layers=FLAGS.child_num_layers,
+        #         cd_length=FLAGS.child_num_cells+2,
+        #         opt_num=FLAGS.opt_num,
+        #         path_pool_size=FLAGS.path_pool_size,
+        #         k_init_selection_num=FLAGS.k_init_selection_num,
+        #         k_best_selection_num=FLAGS.k_best_selection_num,
+        #         max_generation=FLAGS.max_generation)
+        # # pc.build_path_pool_out_tensor(child_ops)
+        # # pc.build_path_pool(10)
+        # if FLAGS.child_fixed_arc is None:
+        #     pc.build_path_pool_full_arc(child_ops)
+        # else:
+        #     pc.eval_dag_arc(child_ops)
+
 
 
 def main(_):
