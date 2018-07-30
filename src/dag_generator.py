@@ -9,29 +9,29 @@ from common_ops import stack_lstm
 class DagGenerator():
 
     def __init__(self,
-               num_branches=4,
-               num_cells=6,
-               lstm_size=32,
-               lstm_num_layers=1, # one layer is enough?
-               lstm_keep_prob=1.0,
-               tanh_constant=None,
-               op_tanh_reduce=1.0,
-               temperature=None,
-               lr_init=1e-3,
-               lr_dec_start=0,
-               lr_dec_every=100,
-               lr_dec_rate=0.9,
-               l2_reg=0,
-               entropy_weight=None,
-               clip_mode=None,
-               grad_bound=None,
-               use_critic=False,
-               bl_dec=0.999,
-               optim_algo="adam",
-               sync_replicas=False,
-               num_aggregate=None,
-               num_replicas=None,
-               name="generator"):
+                 num_branches=4,
+                 num_cells=6,
+                 lstm_size=32,
+                 lstm_num_layers=1, # one layer is enough?
+                 lstm_keep_prob=1.0,
+                 tanh_constant=None,
+                 op_tanh_reduce=1.0,
+                 temperature=None,
+                 lr_init=1e-3,
+                 lr_dec_start=0,
+                 lr_dec_every=100,
+                 lr_dec_rate=0.9,
+                 l2_reg=0,
+                 entropy_weight=None,
+                 clip_mode=None,
+                 grad_bound=None,
+                 use_critic=False,
+                 bl_dec=0.999,
+                 optim_algo="adam",
+                 sync_replicas=False,
+                 num_aggregate=None,
+                 num_replicas=None,
+                 name="generator"):
         print("-" * 80)
         print("Building ConvController")
 
@@ -97,7 +97,7 @@ class DagGenerator():
                         lambda: end, lambda: tf.constant([0], dtype=tf.int32))
             layers.append(tf.concat([pre_layer, ops[i:i+1], end], 0))
     
-        return tf.stack(layers)
+        return tf.concat(layers, 0)
 
     def _create_params(self):
         initializer = tf.random_uniform_initializer(minval=-0.1, maxval=0.1)
@@ -141,10 +141,8 @@ class DagGenerator():
         arc_seq = tf.TensorArray(tf.int32, size=self.num_cells * 1)  # 4
         if prev_c is None:
             assert prev_h is None, "prev_c and prev_h must both be None"
-            prev_c = [tf.zeros([1, self.lstm_size], tf.float32)
-                                for _ in range(self.lstm_num_layers)]
-            prev_h = [tf.zeros([1, self.lstm_size], tf.float32)
-                                for _ in range(self.lstm_num_layers)]
+            prev_c = [tf.zeros([1, self.lstm_size], tf.float32)]
+            prev_h = [tf.zeros([1, self.lstm_size], tf.float32)]
         # inputs = self.g_emb
 
         '''
@@ -161,35 +159,33 @@ class DagGenerator():
             return tf.less(layer_id, self.num_cells)  # + 2
 
         def _body(layer_id, inputs, prev_c, prev_h, arc_seq,
-                            entropy, log_prob):
-            indices = tf.range(0, layer_id, dtype=tf.int32)
+                  entropy, log_prob):
             start_id = 1 * (layer_id)  # - 2
-            prev_layers = []
-            inp = tf.nn.embedding_lookup(self.w_emb, inputs[layer_id])
+            inp = tf.nn.embedding_lookup(self.w_emb, [inputs[layer_id]])
             for i in range(1):    # index, choose with attention or only softmax?
                 next_c, next_h = stack_lstm(inp, prev_c, prev_h, self.w_lstm)
                 prev_c, prev_h = next_c, next_h
                 logits = tf.matmul(next_h[-1], self.w_soft) + self.b_soft
                 if self.temperature is not None:
-                  logits /= self.temperature
+                    logits /= self.temperature
                 if self.tanh_constant is not None:
-                  op_tanh = self.tanh_constant / self.op_tanh_reduce
-                  logits = op_tanh * tf.tanh(logits)
+                    op_tanh = self.tanh_constant / self.op_tanh_reduce
+                    logits = op_tanh * tf.tanh(logits)
                 if use_bias:
-                  logits += self.b_soft_no_learn
+                    logits += self.b_soft_no_learn
                 op_id = tf.multinomial(logits, 1)
                 op_id = tf.to_int32(op_id)
                 op_id = tf.reshape(op_id, [1])
-                arc_seq = arc_seq.write(start_id + 2 * i + 1, op_id)
+                arc_seq = arc_seq.write(start_id, op_id)
                 curr_log_prob = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                  logits=logits, labels=op_id)
+                    logits=logits, labels=op_id)
                 log_prob += curr_log_prob
                 curr_ent = tf.stop_gradient(tf.nn.softmax_cross_entropy_with_logits(
-                  logits=logits, labels=tf.nn.softmax(logits)))
+                    logits=logits, labels=tf.nn.softmax(logits)))
                 entropy += curr_ent
 
             return (layer_id + 1, inputs, next_c, next_h,
-                            arc_seq, entropy, log_prob)
+                    arc_seq, entropy, log_prob)
 
         loop_vars = [
             tf.constant(0, dtype=tf.int32, name="layer_id"),
@@ -202,7 +198,7 @@ class DagGenerator():
         ]
         
         loop_outputs = tf.while_loop(_condition, _body, loop_vars,
-                                                                 parallel_iterations=1)
+                                     parallel_iterations=1)
 
         arc_seq = loop_outputs[-3].stack()
         arc_seq = tf.reshape(arc_seq, [-1])

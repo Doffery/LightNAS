@@ -700,7 +700,7 @@ class DagExecutor(Model):
                 self._enas_dag_conv(x, curr_cell, 5, out_filters),
                 avg_pool,
                 max_pool,
-                x,
+                # x,
         ]
 
         out = tf.stack(out, axis=0)
@@ -1094,10 +1094,10 @@ class DagExecutor(Model):
 
     def initialize(self, generator_model):
         if self.fixed_arc is None:
-            self.normal_arc, self.reduce_arc = generator_model.sample_arc
+            self.dag_arc, self.reduce_arc = generator_model.sample_arc
         else:
             fixed_arc = np.array([int(x) for x in self.fixed_arc.split(" ") if x])
-            self.normal_arc = fixed_arc[:self.cd_length * self.num_cells]
+            self.dag_arc = fixed_arc[:self.cd_length * self.num_cells]
             self.reduce_arc = fixed_arc[self.cd_length * self.num_cells:]
         # self.path_arc = tf.placeholder(tf.int32, shape=(5))
         # if self.fixed_arc is None:

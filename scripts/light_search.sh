@@ -23,7 +23,7 @@ python src/main.py \
   --child_num_layers=6 \
   --child_out_filters=20 \
   --child_l2_reg=1e-4 \
-  --child_num_branches=5 \
+  --child_num_branches=4 \
   --child_num_cells=8 \
   --child_keep_prob=0.90 \
   --child_drop_path_keep_prob=0.60 \

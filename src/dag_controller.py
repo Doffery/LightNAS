@@ -89,19 +89,51 @@ class DagController:
         while num < self.path_pool_size:
             ops_dag = np.zeros(self.num_cells_double, dtype=np.int32)
             for i in range(self.num_cells_double):
-                ops_dag[i] = random.randint(1, self.opt_num-1)
+                ops_dag[i] = random.randint(1, self.opt_num)
             ops_str = np.array2string(ops_dag)
             if ops_str not in sample_dict and self._check_path_double(ops_dag):
                 sample_dict[ops_str] = 1
-                ops_dag_pool.append(ops_str)
+                ops_dag_pool.append(ops_dag)
                 ops_dag_pool_acc.append(0.0)
                 num += 1
         logger.info("Sampled ops dag: {}".format(ops_dag_pool))
         return ops_dag_pool, ops_dag_pool_acc
 
     def _eval_ops_dag(self, sess, ops_dag, child_ops, generator_ops):
+        def _merge_dag(da, db):
+            opt_ind = self.cd_opt_ind
+            end_ind = self.cd_end_ind
+            d2a = np.reshape(da, (self.num_cells, self.cd_length))
+            d2b = np.reshape(db, (self.num_cells, self.cd_length))
+            d2c = np.zeros((self.num_cells, self.cd_length),
+                           dtype=np.int32)
+            for ind in range(self.num_cells):
+                if d2a[ind][opt_ind] == 0 and d2b[ind][opt_ind] == 0:
+                    d2c[ind][opt_ind] = 0
+                    d2c[ind][0] = 2
+                    continue
+                if d2a[ind][opt_ind] == 0:
+                    d2a[ind][0] = 0
+                if d2b[ind][opt_ind] == 0:
+                    d2b[ind][0] = 0
+                for jnd in range(opt_ind):
+                    if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
+                        d2c[ind][jnd] = 1
+                # How do we decide the operator?
+                # Choose the first, the better?
+                if d2a[ind][opt_ind] != 0:
+                    d2c[ind][opt_ind] = d2a[ind][opt_ind]
+                else:
+                    d2c[ind][opt_ind] = d2b[ind][opt_ind]
+
+                # is End or not
+                if d2a[ind][end_ind] == 1 or \
+                        d2b[ind][end_ind] == 1:
+                    d2c[ind][end_ind] = 1
+            return d2c.flatten()
+
         feed_dict = {generator_ops["conv_ops"]: ops_dag[:self.num_cells],
-                generator_ops["reduce_ops"]: ops_dag[self.num_cells:]}
+                     generator_ops["reduce_ops"]: ops_dag[self.num_cells:]}
         run_ops = [
             generator_ops["loss"],
             generator_ops["entropy"],
@@ -113,9 +145,16 @@ class DagController:
             generator_ops["skip_rate"],
             generator_ops["train_op"],
         ]
-        loss, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
-                feed_dict=feed_dict)
-        generator_step = sess.run(generator_ops["train_step"])
+        print(ops_dag)
+        for i in range(3):
+            loss, entropy, arc, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
+                    feed_dict=feed_dict)
+            generator_step = sess.run(generator_ops["train_step"])
+            print("Sampled Arc: ")
+            print(arc)
+            print(val_acc)
+        acc = val_acc
+        best_dag = arc
         return acc, best_dag
 
     def evolve_ops_dag(self, child_ops, generator_ops):
@@ -155,7 +194,7 @@ class DagController:
             # apply mutation
             for ind in seeds:
                 for i in range(self.num_cells_double):
-                    for j in range(1, self.opt_num+1):
+                    for j in range(1, self.opt_num):
                         tmp_path = np.copy(ops_dag_pool[ind])
                         # tmp = tmp_path[i]
                         tmp_path[i] = j  # np.random.randint(0, self.opt_num+1)
@@ -195,7 +234,7 @@ class DagController:
             for i, cpath in enumerate(candidate_ops_dag):
                 # cdag = self._path2dag(cpath)
                 # feed_dict = {child_ops["dag_arc"]: cdag}
-                valid_acc, _ = self._eval_ops_dag(sess, candidate_ops_dag, 
+                valid_acc, _ = self._eval_ops_dag(sess, cpath, 
                                                   child_ops, generator_ops)
                 logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
                 # child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
@@ -206,7 +245,7 @@ class DagController:
 
             top_k_candidates = utils.find_top_k_ind(candidate_accs,
                                                     self.k_best_selection)
-            logger.info("B {0} Top K Candidates: {1}".format(bind, 
+            logger.info("B Top K Candidates: {}".format(
                 top_k_candidates))
 
             # replace the worse with candidates
@@ -235,7 +274,7 @@ class DagController:
             ops_dag_pool_acc = np.array(tmp_path_pool_acc)
 
             # It means train after selection here
-            _train_it_path(0.5, train_cand_set)
+            # _train_it_path(0.5, train_cand_set)
 
             # if evolve_iter % FLAGS.train_every_generations == 0:
             #     logger.info("Train evolving iteration {}".format(evolve_iter))

@@ -7,7 +7,6 @@ import time
 
 import numpy as np
 import tensorflow as tf
-import path_controller
 
 import utils
 # from utils import Logger
@@ -20,12 +19,13 @@ from path_controller import PathController
 from path_generator import PathGenerator
 from dag_executor import DagExecutor
 from dag_generator import DagGenerator
+from dag_controller import DagController
 import data_utils
 from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = ''
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 logger = utils.logger
 
@@ -71,9 +71,32 @@ DEFINE_boolean("child_use_aux_heads", False, "Should we use an aux head")
 DEFINE_boolean("child_sync_replicas", False, "To sync or not to sync.")
 DEFINE_boolean("child_lr_cosine", False, "Use cosine lr schedule")
 
-DEFINE_integer("cd_length", 7, "cell_descriptor_length")
+
+DEFINE_float("controller_lr", 1e-3, "")
+DEFINE_float("controller_lr_dec_rate", 1.0, "")
+DEFINE_float("controller_keep_prob", 0.5, "")
+DEFINE_float("controller_l2_reg", 0.0, "")
+DEFINE_float("controller_bl_dec", 0.99, "")
+DEFINE_float("controller_tanh_constant", None, "")
+DEFINE_float("controller_op_tanh_reduce", 1.0, "")
+DEFINE_float("controller_temperature", None, "")
+DEFINE_float("controller_entropy_weight", None, "")
+DEFINE_float("controller_skip_target", 0.8, "")
+DEFINE_float("controller_skip_weight", 0.0, "")
+DEFINE_integer("controller_num_aggregate", 1, "")
+DEFINE_integer("controller_num_replicas", 1, "")
+DEFINE_integer("controller_train_steps", 50, "")
+DEFINE_integer("controller_forwards_limit", 2, "")
+DEFINE_integer("controller_train_every", 2,
+               "train the controller after this number of epochs")
 DEFINE_boolean("controller_search_whole_channels", False, "")
-DEFINE_integer("opt_num", 5, "num of ops can be selected")
+DEFINE_boolean("controller_sync_replicas", False, "To sync or not to sync.")
+DEFINE_boolean("controller_training", True, "")
+DEFINE_boolean("controller_use_critic", False, "")
+
+
+DEFINE_integer("cd_length", 7, "cell_descriptor_length")
+# DEFINE_integer("opt_num", 4, "num of ops can be selected")
 DEFINE_integer("path_pool_size", 10, "")
 DEFINE_integer("k_init_selection_num", 2, "")
 DEFINE_integer("k_best_selection_num", 2, "")
@@ -191,8 +214,8 @@ def get_ops(images, labels):
       "optimizer": generator_model.optimizer,
       "baseline": generator_model.baseline,
       "entropy": generator_model.sample_entropy,
-      "conv_ops":generator_model.conv_ops,
-      "reduce_ops":generator_model.reduce_ops,
+      "conv_ops": generator_model.conv_ops,
+      "reduce_ops": generator_model.reduce_ops,
       "sample_arc": generator_model.sample_arc,
       "skip_rate": generator_model.skip_rate,
     }
@@ -228,7 +251,7 @@ def train():
                 num_cells=FLAGS.child_num_cells,
                 num_layers=FLAGS.child_num_layers,
                 cd_length=FLAGS.child_num_cells+2,
-                opt_num=FLAGS.opt_num,
+                opt_num=FLAGS.child_num_branches,
                 path_pool_size=FLAGS.path_pool_size,
                 k_init_selection_num=FLAGS.k_init_selection_num,
                 k_best_selection_num=FLAGS.k_best_selection_num,
