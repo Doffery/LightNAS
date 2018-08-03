@@ -100,6 +100,7 @@ class DagController:
         return ops_dag_pool, ops_dag_pool_acc
 
     def _eval_ops_dag(self, sess, ops_dag, child_ops, generator_ops):
+        logger.info("Start evaluating {}".format(ops_dag))
         def _merge_dag(da, db):
             opt_ind = self.cd_opt_ind
             end_ind = self.cd_end_ind
@@ -150,9 +151,9 @@ class DagController:
             loss, entropy, arc, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
                     feed_dict=feed_dict)
             generator_step = sess.run(generator_ops["train_step"])
-            print("Sampled Arc: ")
-            print(arc)
-            print(val_acc)
+            logger.info("Sampled Arc: ")
+            logger.info(arc)
+            logger.info(val_acc)
         acc = val_acc
         best_dag = arc
         return acc, best_dag
