@@ -1,8 +1,10 @@
 import numpy as np
 import tensorflow as tf
+import utils
 
 from utils import get_train_ops
 from common_ops import stack_lstm
+logger = utils.logger
 
 # This class manages the RNN to generate paths 
 # also maybe combine paths to dag
@@ -32,8 +34,8 @@ class DagGenerator():
                  num_aggregate=None,
                  num_replicas=None,
                  name="generator"):
-        print("-" * 80)
-        print("Building ConvController")
+        logger.info("-" * 80)
+        logger.info("Building ConvController")
 
         # self.search_for = search_for
         # self.search_whole_channels = search_whole_channels
@@ -135,8 +137,8 @@ class DagGenerator():
     def _build_sampler(self, inputs, prev_c=None, prev_h=None, use_bias=False):
         """Build the sampler ops and the log_prob ops."""
 
-        print("-" * 80)
-        print("Build controller sampler")
+        logger.info("-" * 80)
+        logger.info("Build controller sampler")
 
         arc_seq = tf.TensorArray(tf.int32, size=self.num_cells * 1)  # 4
         if prev_c is None:
@@ -233,9 +235,9 @@ class DagGenerator():
         self.train_step = tf.Variable(0, dtype=tf.int32, trainable=False, name="train_step")
 
         tf_variables = [var for var in tf.trainable_variables() if var.name.startswith(self.name)]
-        print("-" * 80)
+        logger.info("-" * 80)
         for var in tf_variables:
-            print(var)
+            logger.info(var)
 
         self.train_op, self.lr, self.grad_norm, self.optimizer = get_train_ops(
             self.loss,
