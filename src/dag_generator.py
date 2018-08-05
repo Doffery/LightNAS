@@ -75,14 +75,11 @@ class DagGenerator():
         self.sample_entropy = entropy_1 + entropy_2
         self.sample_log_prob = log_prob_1 + log_prob_2
 
-    def _to_dag(self, ops, path):
+    def _to_dag(self, path, ops):
         ops = tf.multiply(ops, path)
         layers = []
         for i in range(self.num_cells):
-            if i == 0:
-                pre_layer = tf.one_hot(0, self.num_cells, dtype=tf.int32)
-            else:
-                pre_layer = tf.zeros(self.num_cells, dtype=tf.int32)
+            pre_layer = tf.one_hot(0, self.num_cells, dtype=tf.int32)
             for j in range(i):
                 pre_layer = tf.cond(tf.equal(path[j], 0),
                        lambda: pre_layer,
@@ -162,6 +159,8 @@ class DagGenerator():
 
         def _body(layer_id, inputs, prev_c, prev_h, arc_seq,
                   entropy, log_prob):
+            layer_id = tf.Print(layer_id, [layer_id, 'q_t'], 
+                               message='Debug: ', summarize=100)
             start_id = 1 * (layer_id)  # - 2
             inp = tf.nn.embedding_lookup(self.w_emb, [inputs[layer_id]])
             for i in range(1):    # index, choose with attention or only softmax?
@@ -212,6 +211,7 @@ class DagGenerator():
 
         # Combine arc_seq(use ops or not) and input(ops template) to a path dag
 
+        arc_seq = tf.Print(arc_seq, [arc_seq, 'arc_seq'], message='Debug: ', summarize=100)
         return arc_seq, entropy, log_prob, last_c, last_h
 
     def build_trainer(self, child_model):

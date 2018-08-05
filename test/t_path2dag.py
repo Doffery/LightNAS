@@ -24,10 +24,7 @@ def _to_dag( ops, path):
     ops = tf.multiply(ops, path)
     layers = []
     for i in range(num_cells):
-        if i == 0:
-            pre_layer = tf.one_hot(0, num_cells, dtype=tf.int32)
-        else:
-            pre_layer = tf.zeros(num_cells, dtype=tf.int32)
+        pre_layer = tf.one_hot(0, num_cells, dtype=tf.int32)
         for j in range(i):
             pre_layer = tf.cond(tf.equal(path[j], 0),
                    lambda: pre_layer,
@@ -47,5 +44,5 @@ def _to_dag( ops, path):
     return tf.stack(layers)
 
 with tf.Session() as ses:
-    print(ses.run(_to_dag([2,1,3,1,3], [1,0,1,1,0])))
+    print(ses.run(_to_dag([2,1,3,1,3], [0,0,0,1,0])))
 

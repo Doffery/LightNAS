@@ -147,6 +147,9 @@ class DagController:
             generator_ops["train_op"],
         ]
         for i in range(3):
+            generator_step = sess.run(generator_ops["sample_arc"], 
+                    feed_dict=feed_dict)
+            logger.info(generator_step)
             loss, entropy, arc, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
                     feed_dict=feed_dict)
             generator_step = sess.run(generator_ops["train_step"])
