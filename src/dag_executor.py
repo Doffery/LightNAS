@@ -341,7 +341,7 @@ class DagExecutor(Model):
             ilayer = x
             logger.info('Prelayer: {0}'.format(ilayer))
 
-            # tf.Print(ilayer, [ilayer])
+            tf.Print(ilayer, [ilayer])
 
             # building layers in the micro space
             out_filters = self.out_filters
@@ -375,7 +375,7 @@ class DagExecutor(Model):
                     logger.info("Layer {0:>2d}: {1}".format(layer_id, x))
                     ilayer = x
 
-                    # tf.Print(x, [layer_id, x])
+                    tf.Print(x, [layer_id, x])
                     # layers = [layers[-1], x]
 
                 # auxiliary heads
@@ -622,7 +622,8 @@ class DagExecutor(Model):
         # num_possible_inputs = curr_cell + 1
         # add and average all prev cells to x
 
-        tf.summary.tensor_summary('prev_idx', prev_idxs)
+        prev_idxs = tf.Print(prev_idxs, [prev_idxs, 'prev_idx'],
+                             message='Debug: ', summarize=100)
 
         def _not_selected():
             return tf.zeros(shape=tf.shape(prev_layers[0]),
