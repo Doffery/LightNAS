@@ -103,10 +103,23 @@ class DagController:
         logger.info("-" * 80)
         logger.info("Starting session")
         config = tf.ConfigProto(allow_soft_placement=True)
+        saver = tf.train.Saver(max_to_keep=2)
+        checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+            FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
+
+        hooks = [checkpoint_saver_hook]
+        if FLAGS.child_sync_replicas:
+            sync_replicas_hook = child_ops["optimizer"].make_session_run_hook(True)
+            hooks.append(sync_replicas_hook)
+        if FLAGS.controller_training and FLAGS.controller_sync_replicas:
+            sync_replicas_hook = generator_ops["optimizer"].make_session_run_hook(True)
+            hooks.append(sync_replicas_hook)
+
         merged = tf.summary.merge_all()
         time_tag = str(int(time.time()))
         logger.info("Summary Tag {}".format(time_tag))
-        sess = tf.train.SingularMonitoredSession(config=config)
+        sess = tf.train.SingularMonitoredSession(config=config,
+                                hooks=hooks, checkpoint_dir=FLAGS.output_dir)
         train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
                                              sess.graph)
         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -163,7 +176,9 @@ class DagController:
                 generator_ops["skip_rate"],
                 generator_ops["train_op"],
             ]
-            for i in range(1):
+            best_acc = -0.1
+            best_dag = []
+            for i in range(3):
                 # generator_step = sess.run(generator_ops["train_op"], 
                 #         feed_dict=feed_dict)
                 # logger.info(generator_step)
@@ -181,12 +196,10 @@ class DagController:
                 logger.info(gn)
                 logger.info(bl)
                 logger.info(skip)
-            acc, best_dag = sess.run([generator_ops["valid_acc"], generator_ops["sample_arc"]],
-                                     feed_dict=feed_dict, options=run_options,
-                                     run_metadata=run_metadata)
-            # acc = val_acc
-            # best_dag = arc
-            return acc, best_dag
+                if val_acc > best_acc:
+                    best_acc = val_acc
+                    best_dag = arc
+            return best_acc, best_dag
 
         self.iteration = 0
         start_time = time.time()

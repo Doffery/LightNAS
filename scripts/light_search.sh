@@ -10,7 +10,7 @@ python src/main.py \
   --output_dir="outputs" \
   --summaries_dir="log/log" \
   --batch_size=120 \
-  --num_gpus=1 \
+  --num_gpus=2 \
   --path_pool_size=20 \
   --num_epochs=3 \
   --num_epochs_evolve=3 \
@@ -24,7 +24,7 @@ python src/main.py \
   --child_out_filters=20 \
   --child_l2_reg=1e-4 \
   --child_num_branches=4 \
-  --child_num_cells=5 \
+  --child_num_cells=8 \
   --child_keep_prob=0.90 \
   --child_drop_path_keep_prob=0.60 \
   --child_lr_cosine \
@@ -39,7 +39,7 @@ python src/main.py \
   --controller_sync_replicas \
   --controller_num_aggregate=10 \
   --controller_train_steps=30 \
-  --controller_lr=3.5 \
+  --controller_lr=0.35 \
   --controller_tanh_constant=1.10 \
   --controller_op_tanh_reduce=2.5 \
   "$@"

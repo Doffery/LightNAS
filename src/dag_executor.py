@@ -956,58 +956,8 @@ class DagExecutor(Model):
         out = tf.reshape(out, tf.shape(prev_layer))
         return out
 
-    def _build_train(self):
-        logger.info("-" * 80)
-        logger.info("Build train graph")
-        logits = self._model(self.x_train, is_training=True)
-        log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
-            logits=logits, labels=self.y_train)
-        self.loss = tf.reduce_mean(log_probs)
-
-        if self.use_aux_heads:
-            log_probs = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=self.aux_logits, labels=self.y_train)
-            self.aux_loss = tf.reduce_mean(log_probs)
-            train_loss = self.loss + 0.4 * self.aux_loss
-        else:
-            train_loss = self.loss
-
-        self.train_preds = tf.argmax(logits, axis=1)
-        self.train_preds = tf.to_int32(self.train_preds)
-        self.train_acc = tf.equal(self.train_preds, self.y_train)
-        self.train_acc = tf.to_int32(self.train_acc)
-        self.train_acc = tf.reduce_sum(self.train_acc)
-
-        tf_variables = [
-            var for var in tf.trainable_variables() if (
-                var.name.startswith(self.name) and "aux_head" not in var.name)]
-        self.num_vars = count_model_params(tf_variables)
-        logger.info("Model has {0} params".format(self.num_vars))
-
-        self.train_op, self.lr, self.grad_norm, self.optimizer = get_train_ops(
-            train_loss,
-            tf_variables,
-            self.global_step,
-            clip_mode=self.clip_mode,
-            grad_bound=self.grad_bound,
-            l2_reg=self.l2_reg,
-            lr_init=self.lr_init,
-            lr_dec_start=self.lr_dec_start,
-            lr_dec_every=self.lr_dec_every,
-            lr_dec_rate=self.lr_dec_rate,
-            lr_cosine=self.lr_cosine,
-            lr_max=self.lr_max,
-            lr_min=self.lr_min,
-            lr_T_0=self.lr_T_0,
-            lr_T_mul=self.lr_T_mul,
-            num_train_batches=self.num_train_batches,
-            optim_algo=self.optim_algo,
-            sync_replicas=self.sync_replicas,
-            num_aggregate=self.num_aggregate,
-            num_replicas=self.num_replicas)
-
     # override
-    def _build_train_re(self):
+    def _build_train(self):
         logger.info("-" * 80)
         logger.info("Build train graph")
         tower_grads = []

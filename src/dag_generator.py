@@ -244,7 +244,7 @@ class DagGenerator():
 
         tf_variables = [var for var in tf.trainable_variables() if var.name.startswith(self.name)]
         logger.info("-" * 80)
-        for var in tf.trainable_variables():  # tf_variables:
+        for var in tf_variables:
             logger.info(var)
 
         self.train_op, self.lr, self.grad_norm, self.optimizer = get_train_ops(

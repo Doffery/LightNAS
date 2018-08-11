@@ -344,7 +344,10 @@ def get_train_ops(
         loss += l2_reg * l2_loss
 
     grads = tf.gradients(loss, tf_variables)
-    grads = tf.Print(grads, [grads, 'grads'], message='Debug: ', summarize=100)
+    # ind = 0
+    # for g in grads:
+    #     grads[ind] = tf.Print(g, [g, g.name, 'grads'], message='Debug: ', summarize=100)
+    #     ind += 1
     grad_norm = tf.global_norm(grads)
 
 
@@ -414,6 +417,9 @@ def get_train_ops(
     if lr_warmup_val is not None:
         learning_rate = tf.cond(tf.less(train_step, lr_warmup_steps),
                                 lambda: lr_warmup_val, lambda: learning_rate)
+
+    # learning_rate = tf.Print(learning_rate, [learning_rate, 'lr'],
+    #                          message='Debug: ', summarize=100)
 
     # if get_grad_norms:
     #     g_1, g_2 = 0.0001, 0.0001
