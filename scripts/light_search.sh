@@ -39,7 +39,7 @@ python src/main.py \
   --controller_sync_replicas \
   --controller_num_aggregate=10 \
   --controller_train_steps=30 \
-  --controller_lr=0.0035 \
+  --controller_lr=3.5 \
   --controller_tanh_constant=1.10 \
   --controller_op_tanh_reduce=2.5 \
   "$@"
