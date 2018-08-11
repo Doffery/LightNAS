@@ -163,19 +163,24 @@ class DagController:
                 generator_ops["skip_rate"],
                 generator_ops["train_op"],
             ]
-            for i in range(0):
+            for i in range(1):
                 # generator_step = sess.run(generator_ops["train_op"], 
                 #         feed_dict=feed_dict)
                 # logger.info(generator_step)
                 summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
                                         feed_dict=feed_dict, options=run_options,
                                         run_metadata=run_metadata)
-                train_writer.add_run_metadata(run_metadata,
-                                      'step{0}'.format(i))
-                train_writer.add_summary(summary, self.iteration)
+                # train_writer.add_run_metadata(run_metadata,
+                #                       'step{0}{1}'.format(self.iteration, i))
+                # train_writer.add_summary(summary, self.iteration)
                 logger.info("Sampled Arc: ")
                 logger.info(arc)
                 logger.info(val_acc)
+                logger.info(entropy)
+                logger.info(lr)
+                logger.info(gn)
+                logger.info(bl)
+                logger.info(skip)
             acc, best_dag = sess.run([generator_ops["valid_acc"], generator_ops["sample_arc"]],
                                      feed_dict=feed_dict, options=run_options,
                                      run_metadata=run_metadata)
@@ -291,8 +296,10 @@ class DagController:
                     tmp_path_pool.append(ops_pool[ind])
                     # tmp_dag_pool.append(self._path2dag(path_pool[ind]))
                     tmp_path_pool_acc.append(ops_pool_acc[ind])
-            ops_pool = np.array(tmp_path_pool)
-            ops_pool_acc = np.array(tmp_path_pool_acc)
+            ops_pool = tmp_path_pool
+            ops_pool_acc = tmp_path_pool_acc
+            # ops_pool = np.array(tmp_path_pool)
+            # ops_pool_acc = np.array(tmp_path_pool_acc)
 
             def _train_it_path(extra_epoch_num, train_path_pool):
                 _train_it(extra_epoch_num,
