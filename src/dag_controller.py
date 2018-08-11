@@ -99,76 +99,92 @@ class DagController:
         logger.info("Sampled ops dag: {}".format(ops_pool))
         return ops_pool, ops_pool_acc
 
-    def _eval_ops_dag(self, sess, ops_dag, child_ops, generator_ops):
-        logger.info("Start evaluating {}".format(ops_dag))
-        def _merge_dag(da, db):
-            opt_ind = self.cd_opt_ind
-            end_ind = self.cd_end_ind
-            d2a = np.reshape(da, (self.num_cells, self.cd_length))
-            d2b = np.reshape(db, (self.num_cells, self.cd_length))
-            d2c = np.zeros((self.num_cells, self.cd_length),
-                           dtype=np.int32)
-            for ind in range(self.num_cells):
-                if d2a[ind][opt_ind] == 0 and d2b[ind][opt_ind] == 0:
-                    d2c[ind][opt_ind] = 0
-                    d2c[ind][0] = 2
-                    continue
-                if d2a[ind][opt_ind] == 0:
-                    d2a[ind][0] = 0
-                if d2b[ind][opt_ind] == 0:
-                    d2b[ind][0] = 0
-                for jnd in range(opt_ind):
-                    if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
-                        d2c[ind][jnd] = 1
-                # How do we decide the operator?
-                # Choose the first, the better?
-                if d2a[ind][opt_ind] != 0:
-                    d2c[ind][opt_ind] = d2a[ind][opt_ind]
-                else:
-                    d2c[ind][opt_ind] = d2b[ind][opt_ind]
-
-                # is End or not
-                if d2a[ind][end_ind] == 1 or \
-                        d2b[ind][end_ind] == 1:
-                    d2c[ind][end_ind] = 1
-            return d2c.flatten()
-
-        feed_dict = {generator_ops["conv_ops"]: ops_dag[:self.num_cells],
-                     generator_ops["reduce_ops"]: ops_dag[self.num_cells:]}
-        run_ops = [
-            generator_ops["loss"],
-            generator_ops["entropy"],
-            generator_ops["sample_arc"],
-            generator_ops["lr"],
-            generator_ops["grad_norm"],
-            generator_ops["valid_acc"],
-            generator_ops["baseline"],
-            generator_ops["skip_rate"],
-            generator_ops["train_op"],
-        ]
-        for i in range(3):
-            generator_step = sess.run(generator_ops["sample_arc"], 
-                    feed_dict=feed_dict)
-            logger.info(generator_step)
-            loss, entropy, arc, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
-                    feed_dict=feed_dict)
-            generator_step = sess.run(generator_ops["train_step"])
-            logger.info("Sampled Arc: ")
-            logger.info(arc)
-            logger.info(val_acc)
-        acc = val_acc
-        best_dag = arc
-        return acc, best_dag
-
     def evolve_ops_dag(self, child_ops, generator_ops):
         logger.info("-" * 80)
         logger.info("Starting session")
         config = tf.ConfigProto(allow_soft_placement=True)
+        merged = tf.summary.merge_all()
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
         sess = tf.train.SingularMonitoredSession(config=config)
+        train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
+                                             sess.graph)
+        run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+        run_metadata = tf.RunMetadata()
         ops_pool, ops_pool_acc = self._init_ops_pool()
         # start evolving
         logger.info("Start evolving...")
         evolve_iter = 0
+
+        def _eval_ops_dag(sess, ops_dag, child_ops, generator_ops):
+            logger.info("Start evaluating {}".format(ops_dag))
+            def _merge_dag(da, db):
+                opt_ind = self.cd_opt_ind
+                end_ind = self.cd_end_ind
+                d2a = np.reshape(da, (self.num_cells, self.cd_length))
+                d2b = np.reshape(db, (self.num_cells, self.cd_length))
+                d2c = np.zeros((self.num_cells, self.cd_length),
+                               dtype=np.int32)
+                for ind in range(self.num_cells):
+                    if d2a[ind][opt_ind] == 0 and d2b[ind][opt_ind] == 0:
+                        d2c[ind][opt_ind] = 0
+                        d2c[ind][0] = 2
+                        continue
+                    if d2a[ind][opt_ind] == 0:
+                        d2a[ind][0] = 0
+                    if d2b[ind][opt_ind] == 0:
+                        d2b[ind][0] = 0
+                    for jnd in range(opt_ind):
+                        if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
+                            d2c[ind][jnd] = 1
+                    # How do we decide the operator?
+                    # Choose the first, the better?
+                    if d2a[ind][opt_ind] != 0:
+                        d2c[ind][opt_ind] = d2a[ind][opt_ind]
+                    else:
+                        d2c[ind][opt_ind] = d2b[ind][opt_ind]
+
+                    # is End or not
+                    if d2a[ind][end_ind] == 1 or \
+                            d2b[ind][end_ind] == 1:
+                        d2c[ind][end_ind] = 1
+                return d2c.flatten()
+
+            feed_dict = {generator_ops["conv_ops"]: ops_dag[:self.num_cells],
+                         generator_ops["reduce_ops"]: ops_dag[self.num_cells:]}
+            run_ops = [
+                merged,
+                generator_ops["sample_arc"],
+                generator_ops["entropy"],
+                generator_ops["lr"],
+                generator_ops["grad_norm"],
+                generator_ops["valid_acc"],
+                generator_ops["baseline"],
+                generator_ops["skip_rate"],
+                generator_ops["train_op"],
+            ]
+            for i in range(0):
+                # generator_step = sess.run(generator_ops["train_op"], 
+                #         feed_dict=feed_dict)
+                # logger.info(generator_step)
+                summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
+                                        feed_dict=feed_dict, options=run_options,
+                                        run_metadata=run_metadata)
+                train_writer.add_run_metadata(run_metadata,
+                                      'step{0}'.format(i))
+                train_writer.add_summary(summary, self.iteration)
+                logger.info("Sampled Arc: ")
+                logger.info(arc)
+                logger.info(val_acc)
+            acc, best_dag = sess.run([generator_ops["valid_acc"], generator_ops["sample_arc"]],
+                                     feed_dict=feed_dict, options=run_options,
+                                     run_metadata=run_metadata)
+            # acc = val_acc
+            # best_dag = arc
+            return acc, best_dag
+
+        self.iteration = 0
+        start_time = time.time()
         while evolve_iter < self.max_generation:
             evolve_iter += 1
             # select top-k
@@ -238,7 +254,7 @@ class DagController:
             for i, cpath in enumerate(candidate_ops):
                 # cdag = self._path2dag(cpath)
                 # feed_dict = {child_ops["dag_arc"]: cdag}
-                valid_acc, best_dag = self._eval_ops_dag(sess, cpath, 
+                valid_acc, best_dag = _eval_ops_dag(sess, cpath, 
                                                   child_ops, generator_ops)
                 logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
                 # child_ops["eval_func"](sess, "test", feed_dict=feed_dict)

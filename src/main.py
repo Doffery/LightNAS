@@ -25,7 +25,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '0,1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 logger = utils.logger
 
@@ -164,7 +164,7 @@ def get_ops(images, labels):
     generator_model = DagGenerator(
         num_cells=FLAGS.child_num_cells,
         num_branches=FLAGS.child_num_branches,
-        lstm_size=64,
+        lstm_size=32,
         lstm_num_layers=1,
         lstm_keep_prob=1.0,
         tanh_constant=FLAGS.controller_tanh_constant,

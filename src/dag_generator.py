@@ -77,6 +77,12 @@ class DagGenerator():
 
     def _to_dag(self, path, ops):
         ops = tf.multiply(ops, path)
+
+        # if path is empty, add an identity layer
+        not_empty = tf.reduce_sum(path)
+        path = tf.cond(tf.equal(not_empty, 0),
+                       lambda: tf.one_hot(0, self.num_cells, dtype=tf.int32),
+                       lambda: path)
         layers = []
         for i in range(self.num_cells):
             pre_layer = tf.one_hot(0, self.num_cells, dtype=tf.int32)
@@ -219,6 +225,8 @@ class DagGenerator():
         self.valid_acc = (tf.to_float(child_model.valid_shuffle_acc) /
                                             tf.to_float(child_model.batch_size))
         self.reward = self.valid_acc
+        self.reward = tf.Print(self.reward, [self.reward, 'Reward: '],
+                               message="Debug: ", summarize=100)
 
         if self.entropy_weight is not None:
             self.reward += self.entropy_weight * self.sample_entropy
@@ -236,7 +244,7 @@ class DagGenerator():
 
         tf_variables = [var for var in tf.trainable_variables() if var.name.startswith(self.name)]
         logger.info("-" * 80)
-        for var in tf_variables:
+        for var in tf.trainable_variables():  # tf_variables:
             logger.info(var)
 
         self.train_op, self.lr, self.grad_norm, self.optimizer = get_train_ops(

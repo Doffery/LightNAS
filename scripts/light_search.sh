@@ -9,8 +9,8 @@ python src/main.py \
   --data_path="data/cifar10" \
   --output_dir="outputs" \
   --summaries_dir="log/log" \
-  --batch_size=160 \
-  --num_gpus=2 \
+  --batch_size=120 \
+  --num_gpus=1 \
   --path_pool_size=20 \
   --num_epochs=3 \
   --num_epochs_evolve=3 \
