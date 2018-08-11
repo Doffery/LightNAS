@@ -114,7 +114,7 @@ class DagGenerator():
                         w = tf.get_variable("w", [2 * self.lstm_size, 4 * self.lstm_size])
                         self.w_lstm.append(w)
 
-            self.g_emb = tf.get_variable("g_emb", [1, self.lstm_size])
+            # self.g_emb = tf.get_variable("g_emb", [1, self.lstm_size])
             self.out_size = 2
             with tf.variable_scope("emb"):
                 self.w_emb = tf.get_variable("w", [self.num_branches, self.lstm_size])
@@ -169,27 +169,27 @@ class DagGenerator():
                                message='Debug: ', summarize=100)
             start_id = 1 * (layer_id)  # - 2
             inp = tf.nn.embedding_lookup(self.w_emb, [inputs[layer_id]])
-            for i in range(1):    # index, choose with attention or only softmax?
-                next_c, next_h = stack_lstm(inp, prev_c, prev_h, self.w_lstm)
-                prev_c, prev_h = next_c, next_h
-                logits = tf.matmul(next_h[-1], self.w_soft) + self.b_soft
-                if self.temperature is not None:
-                    logits /= self.temperature
-                if self.tanh_constant is not None:
-                    op_tanh = self.tanh_constant / self.op_tanh_reduce
-                    logits = op_tanh * tf.tanh(logits)
-                if use_bias:
-                    logits += self.b_soft_no_learn
-                op_id = tf.multinomial(logits, 1)
-                op_id = tf.to_int32(op_id)
-                op_id = tf.reshape(op_id, [1])
-                arc_seq = arc_seq.write(start_id, op_id)
-                curr_log_prob = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                    logits=logits, labels=op_id)
-                log_prob += curr_log_prob
-                curr_ent = tf.stop_gradient(tf.nn.softmax_cross_entropy_with_logits(
-                    logits=logits, labels=tf.nn.softmax(logits)))
-                entropy += curr_ent
+            # for i in range(1):    # index, choose with attention or only softmax?
+            next_c, next_h = stack_lstm(inp, prev_c, prev_h, self.w_lstm)
+            prev_c, prev_h = next_c, next_h
+            logits = tf.matmul(next_h[-1], self.w_soft) + self.b_soft
+            if self.temperature is not None:
+                logits /= self.temperature
+            if self.tanh_constant is not None:
+                op_tanh = self.tanh_constant / self.op_tanh_reduce
+                logits = op_tanh * tf.tanh(logits)
+            if use_bias:
+                logits += self.b_soft_no_learn
+            op_id = tf.multinomial(logits, 1)
+            op_id = tf.to_int32(op_id)
+            op_id = tf.reshape(op_id, [1])
+            arc_seq = arc_seq.write(start_id, op_id)
+            curr_log_prob = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                logits=logits, labels=op_id)
+            log_prob += curr_log_prob
+            curr_ent = tf.stop_gradient(tf.nn.softmax_cross_entropy_with_logits(
+                logits=logits, labels=tf.nn.softmax(logits)))
+            entropy += curr_ent
 
             return (layer_id + 1, inputs, next_c, next_h,
                     arc_seq, entropy, log_prob)
