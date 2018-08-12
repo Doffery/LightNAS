@@ -110,7 +110,7 @@ class DagController:
         hooks = [checkpoint_saver_hook]
         if FLAGS.child_sync_replicas:
             sync_replicas_hook = child_ops["optimizer"].make_session_run_hook(True)
-            hooks.append(sync_replicas_hook)
+        #     hooks.append(sync_replicas_hook)
         if FLAGS.controller_training and FLAGS.controller_sync_replicas:
             sync_replicas_hook = generator_ops["optimizer"].make_session_run_hook(True)
             hooks.append(sync_replicas_hook)
