@@ -109,9 +109,9 @@ class DagController:
         # logger.info(d2b[0][-2])
         # logger.info(d2b[0][-2] == 1)
         if d2a[0][-1] == 1 and d2a[0][-2] == 0:
-            return db
+            d2a[0][-2] = -1
         if d2b[0][-1] == 1 and d2b[0][-2] == 0:
-            return da
+            d2b[0][-2] = -1
         d2c = np.zeros((self.num_cells, self.cd_length),
                        dtype=np.int32)
         for ind in range(self.num_cells):
@@ -137,6 +137,8 @@ class DagController:
             if d2a[ind][end_ind] == 1 or \
                     d2b[ind][end_ind] == 1:
                 d2c[ind][end_ind] = 1
+        if d2c[0][-2] == -1:
+            d2c[0][-2] = 0
         return d2c.flatten()
 
     def evolve_ops_dag(self, child_ops, generator_ops):
@@ -339,7 +341,7 @@ class DagController:
                 logger.info("Final reduce dag{}".format(np.reshape(final_dag_reduce,
                 (self.num_cells, self.cd_length))))
                 best_acc = final_acc
-                best_dag = np.array([final_dag, final_dag_reduce]).flatten()
+                best_dag = (final_dag, final_dag_reduce)
                 return best_acc, best_dag
 
             return _merge_strategy_greedy(pool, pool_acc)
