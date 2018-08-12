@@ -99,6 +99,38 @@ class DagController:
         logger.info("Sampled ops dag: {}".format(ops_pool))
         return ops_pool, ops_pool_acc
 
+    def _merge_dag(self, da, db):
+        opt_ind = self.cd_opt_ind
+        end_ind = self.cd_end_ind
+        d2a = np.reshape(da, (self.num_cells, self.cd_length))
+        d2b = np.reshape(db, (self.num_cells, self.cd_length))
+        d2c = np.zeros((self.num_cells, self.cd_length),
+                       dtype=np.int32)
+        for ind in range(self.num_cells):
+            if d2a[ind][opt_ind] == 0 and d2b[ind][opt_ind] == 0:
+                d2c[ind][opt_ind] = 0
+                d2c[ind][0] = 2
+                continue
+            if d2a[ind][opt_ind] == 0:
+                d2a[ind][0] = 0
+            if d2b[ind][opt_ind] == 0:
+                d2b[ind][0] = 0
+            for jnd in range(opt_ind):
+                if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
+                    d2c[ind][jnd] = 1
+            # How do we decide the operator?
+            # Choose the first, the better?
+            if d2a[ind][opt_ind] != 0:
+                d2c[ind][opt_ind] = d2a[ind][opt_ind]
+            else:
+                d2c[ind][opt_ind] = d2b[ind][opt_ind]
+
+            # is End or not
+            if d2a[ind][end_ind] == 1 or \
+                    d2b[ind][end_ind] == 1:
+                d2c[ind][end_ind] = 1
+        return d2c.flatten()
+
     def evolve_ops_dag(self, child_ops, generator_ops):
         logger.info("-" * 80)
         logger.info("Starting session")
@@ -131,38 +163,6 @@ class DagController:
 
         def _eval_ops_dag(sess, ops_dag, child_ops, generator_ops):
             logger.info("Start evaluating {}".format(ops_dag))
-            def _merge_dag(da, db):
-                opt_ind = self.cd_opt_ind
-                end_ind = self.cd_end_ind
-                d2a = np.reshape(da, (self.num_cells, self.cd_length))
-                d2b = np.reshape(db, (self.num_cells, self.cd_length))
-                d2c = np.zeros((self.num_cells, self.cd_length),
-                               dtype=np.int32)
-                for ind in range(self.num_cells):
-                    if d2a[ind][opt_ind] == 0 and d2b[ind][opt_ind] == 0:
-                        d2c[ind][opt_ind] = 0
-                        d2c[ind][0] = 2
-                        continue
-                    if d2a[ind][opt_ind] == 0:
-                        d2a[ind][0] = 0
-                    if d2b[ind][opt_ind] == 0:
-                        d2b[ind][0] = 0
-                    for jnd in range(opt_ind):
-                        if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
-                            d2c[ind][jnd] = 1
-                    # How do we decide the operator?
-                    # Choose the first, the better?
-                    if d2a[ind][opt_ind] != 0:
-                        d2c[ind][opt_ind] = d2a[ind][opt_ind]
-                    else:
-                        d2c[ind][opt_ind] = d2b[ind][opt_ind]
-
-                    # is End or not
-                    if d2a[ind][end_ind] == 1 or \
-                            d2b[ind][end_ind] == 1:
-                        d2c[ind][end_ind] = 1
-                return d2c.flatten()
-
             feed_dict = {generator_ops["conv_ops"]: ops_dag[:self.num_cells],
                          generator_ops["reduce_ops"]: ops_dag[self.num_cells:]}
             run_ops = [
@@ -176,9 +176,9 @@ class DagController:
                 generator_ops["skip_rate"],
                 generator_ops["train_op"],
             ]
-            best_acc = -0.1
-            best_dag = []
-            for i in range(3):
+            pool = []
+            pool_acc = []
+            for i in range(10):
                 # generator_step = sess.run(generator_ops["train_op"], 
                 #         feed_dict=feed_dict)
                 # logger.info(generator_step)
@@ -196,10 +196,69 @@ class DagController:
                 logger.info(gn)
                 logger.info(bl)
                 logger.info(skip)
-                if val_acc > best_acc:
-                    best_acc = val_acc
-                    best_dag = arc
-            return best_acc, best_dag
+                pool.append(arc)
+                pool_acc.append(val_acc)
+
+            def _merge_strategy_greedy(path_pool, path_pool_acc):
+                being_better = True
+                sort_acc = sorted(enumerate(path_pool_acc),
+                                  key=lambda p: p[1], reverse=True)
+                check_list = np.zeros((len(path_pool)), dtype=np.bool)
+                check_list[0] = True
+                final_dag = self._path2dag(path_pool[sort_acc[0][0]][:self.num_cells])
+                final_dag_reduce = self._path2dag(path_pool[sort_acc[0][0]][self.num_cells:])
+                logger.info("Merge dag{}".format(np.reshape(final_dag,
+                    (self.num_cells, self.cd_length))))
+                logger.info("Merge reduce dag{}".format(np.reshape(final_dag_reduce,
+                    (self.num_cells, self.cd_length))))
+                # Choose the best is not always a good idea?
+                final_acc = path_pool_acc[sort_acc[10][0]]
+                while being_better:
+                    choose_dag = final_dag
+                    choose_dag_reduce = final_dag_reduce
+                    choose_acc = final_acc
+                    choose_ind = 0
+                    being_better = False
+                    for ind in range(1, len(sort_acc)):
+                        if check_list[ind]:
+                            continue
+                        tmp_dag = _merge_dag(final_dag,
+                                self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
+                        tmp_dag_reduce = _merge_dag(final_dag_reduce,
+                                self._path2dag(path_pool[sort_acc[ind][0]][self.num_cells:]))
+                        _train_it(0.5, [(tmp_dag, tmp_dag_reduce)])
+                        # feed_dict = {child_ops["dag_arc"]: tmp_dag}
+                        feed_dict = {child_ops["dag_arc"]: tmp_dag,
+                                child_ops["reduce_arc"]: tmp_dag_reduce}
+                        valid_acc = sess.run(child_ops["valid_rl_acc"],
+                                             feed_dict=feed_dict)
+                        logger.info("Merge {0} acc {1}".format(sort_acc[ind][0], valid_acc))
+                        logger.info(self._path2dag(path_pool[sort_acc[ind][0]][:self.num_cells]))
+                        logger.info(tmp_dag)
+                        if valid_acc > choose_acc:
+                            being_better = True
+                            choose_ind = ind
+                            choose_dag = tmp_dag
+                            choose_dag_reduce = tmp_dag_reduce
+                            choose_acc = valid_acc
+                    check_list[choose_ind] = True
+                    final_dag = choose_dag
+                    final_dag_reduce = choose_dag_reduce
+                    final_acc = choose_acc
+                    logger.info("Merge dag{}".format(np.reshape(final_dag,
+                        (self.num_cells, self.cd_length))))
+                    logger.info("Merge reduce dag{}".format(np.reshape(final_dag_reduce,
+                        (self.num_cells, self.cd_length))))
+                logger.info("Final valid acc{}".format(final_acc))
+                logger.info("Final dag{}".format(np.reshape(final_dag,
+                    (self.num_cells, self.cd_length))))
+                logger.info("Final reduce dag{}".format(np.reshape(final_dag_reduce,
+                (self.num_cells, self.cd_length))))
+                best_acc = final_acc
+                best_dag = np.array([final_dag, final_dag_reduce]).flatten()
+                return best_acc, best_dag
+
+            return _merge_strategy_greedy(pool, pool_acc)
 
         self.iteration = 0
         start_time = time.time()
