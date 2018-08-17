@@ -16,9 +16,42 @@ def _path2dag(path):
                 dag[pre_op_idx*(num_cells+2)-1] = 0
             dag[start_idx+num_cells+1] = 1
             pre_op_idx = i+1
-    return dag.reshape((num_cells, num_cells+2))
+    # return dag.reshape((num_cells, num_cells+2))
+    return dag
 
 print(_path2dag([2,0,3,1,0]))
+
+def _merge_dag(da, db):
+    d2a = np.reshape(da, (num_cells, (num_cells+2)))
+    d2b = np.reshape(db, (num_cells, (num_cells+2)))
+    d2c = np.zeros((num_cells, num_cells+2), dtype=np.int32)
+    for ind in range(num_cells):
+        if d2a[ind][num_cells] == 0 and \
+                d2b[ind][num_cells] == 0:
+            d2c[ind][num_cells] = 0
+            d2c[ind][0] = 2
+            continue
+        if d2a[ind][num_cells] == 0:
+            d2a[ind][0] = 0
+        if d2b[ind][num_cells] == 0:
+            d2b[ind][0] = 0
+        for jnd in range(num_cells):
+            if d2a[ind][jnd] != 0 or d2b[ind][jnd] != 0:
+                d2c[ind][jnd] = 1
+        # How do we decide the operator?
+        # Choose the first, the better?
+        if d2a[ind][num_cells] != 0:
+            d2c[ind][num_cells] = d2a[ind][num_cells]
+        else:
+            d2c[ind][num_cells] = d2b[ind][num_cells]
+
+        # is End or not
+        if d2a[ind][num_cells+1] == 1 or \
+                d2b[ind][num_cells+1] == 1:
+            d2c[ind][num_cells+1] = 1
+    return d2c .flatten()
+
+print(_merge_dag(_path2dag([2,0,3,1,0]), _path2dag([2,0,3,1,0])))
 
 def _to_dag( ops, path):
     ops = tf.multiply(ops, path)
@@ -43,6 +76,6 @@ def _to_dag( ops, path):
 
     return tf.stack(layers)
 
-with tf.Session() as ses:
-    print(ses.run(_to_dag([2,1,3,1,3], [0,0,0,1,0])))
+#with tf.Session() as ses:
+#    print(ses.run(_to_dag([2,1,3,1,3], [0,0,0,1,0])))
 

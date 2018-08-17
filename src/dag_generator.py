@@ -165,8 +165,6 @@ class DagGenerator():
 
         def _body(layer_id, inputs, prev_c, prev_h, arc_seq,
                   entropy, log_prob):
-            layer_id = tf.Print(layer_id, [layer_id, 'q_t'], 
-                               message='Debug: ', summarize=100)
             start_id = 1 * (layer_id)  # - 2
             inp = tf.nn.embedding_lookup(self.w_emb, [inputs[layer_id]])
             # for i in range(1):    # index, choose with attention or only softmax?
