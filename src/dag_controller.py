@@ -145,11 +145,12 @@ class DagController:
         logger.info("-" * 80)
         logger.info("Starting session")
         config = tf.ConfigProto(allow_soft_placement=True)
-        saver = tf.train.Saver(max_to_keep=2)
-        checkpoint_saver_hook = tf.train.CheckpointSaverHook(
-            FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
+        # saver = tf.train.Saver(max_to_keep=2)
+        # checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+        #     FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
 
-        hooks = [checkpoint_saver_hook]
+        # hooks = [checkpoint_saver_hook]
+        hooks = []
         if FLAGS.child_sync_replicas:
             sync_replicas_hook = child_ops["optimizer"].make_session_run_hook(True)
         #     hooks.append(sync_replicas_hook)
@@ -161,7 +162,7 @@ class DagController:
         time_tag = str(int(time.time()))
         logger.info("Summary Tag {}".format(time_tag))
         sess = tf.train.SingularMonitoredSession(config=config,
-                                hooks=hooks, checkpoint_dir=FLAGS.output_dir)
+                                hooks=hooks)  # , checkpoint_dir=FLAGS.output_dir)
         train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
                                              sess.graph)
         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -272,7 +273,7 @@ class DagController:
                 #                       'step{0}{1}'.format(self.iteration, i))
                 # train_writer.add_summary(summary, self.iteration)
                 logger.info("Sampled Arc: ")
-                logger.info(np.reshape(arc, (self.num_cells, self.cd_length)))
+                logger.info(np.reshape(arc, (self.num_cells*2, self.cd_length)))
                 logger.info(val_acc)
                 logger.info(entropy)
                 logger.info(lr)
@@ -302,14 +303,16 @@ class DagController:
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     logger.info(bin(it))
-                    logger.info(tmp_dag)
-                    logger.info(tmp_dag_reduce)
+                    logger.info(np.reshape(tmp_dag,
+                                           (self.num_cells, self.cd_length)))
+                    logger.info(np.reshape(tmp_dag_reduce,
+                                           (self.num_cells, self.cd_length)))
                     logger.info(valid_acc)
                     if valid_acc > best_acc:
                         final_dag = tmp_dag
                         final_dag_reduce = tmp_dag_reduce
                         best_acc = valid_acc
-                return best_acc, final_dag
+                return best_acc, (final_dag, final_dag_reduce)
 
 
             def _merge_strategy_greedy(path_pool, path_pool_acc):
