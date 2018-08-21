@@ -9,15 +9,15 @@ python src/main.py \
   --data_path="data/cifar10" \
   --output_dir="outputs" \
   --summaries_dir="log/log" \
-  --batch_size=120 \
-  --num_gpus=2 \
+  --batch_size=160 \
+  --num_gpus=1 \
   --path_pool_size=20 \
   --num_epochs=3 \
   --num_epochs_evolve=3 \
   --log_every=50 \
   --eval_every=23 \
   --eval_every_epochs=1 \
-  --max_generation=60 \
+  --max_generation=100 \
   --train_every_generations=5 \
   --child_use_aux_heads \
   --child_num_layers=6 \

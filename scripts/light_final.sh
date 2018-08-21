@@ -14,7 +14,7 @@ python src/main.py \
   --output_dir="outputs" \
   --summaries_dir="elog/log" \
   --batch_size=144 \
-  --num_gpus=0 \
+  --num_gpus=1 \
   --num_cpus=10 \
   --num_epochs=200 \
   --path_pool_size=1 \

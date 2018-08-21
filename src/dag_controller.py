@@ -380,10 +380,11 @@ class DagController:
                 best_dag = (final_dag, final_dag_reduce)
                 return best_acc, best_dag
 
-            return _merge_extensive(pool, pool_acc)
+            return _merge_strategy_greedy(pool, pool_acc)
 
         ops_pool = self._init_ops_pool()
         ops_pool_acc = []
+        ops_pool_dag = []
         init_dags = []
         for op in ops_pool:
             best_acc, best_dag = _eval_ops_dag(sess, op, child_ops, generator_ops)
@@ -510,24 +511,33 @@ class DagController:
             # It means train after selection here
             # _train_it(0.5, train_cand_set)
             ops_pool_acc = []
-            init_dags = []
+            init_dags.clear()
             for op in ops_pool:
                 best_acc, best_dag = _eval_ops_dag(sess, op, child_ops, generator_ops)
                 # ops_pool_acc.append(best_acc)
                 init_dags.append(best_dag)
             _train_it(0.5, init_dags)
+            ops_pool_dag.clear()
             for op in ops_pool:
                 best_acc, best_dag = _eval_ops_dag(sess, op, child_ops, generator_ops)
                 ops_pool_acc.append(best_acc)
                 # init_dags.append(best_dag)
+                ops_pool_dag.append(best_dag)
 
             # if evolve_iter % FLAGS.train_every_generations == 0:
             #     logger.info("Train evolving iteration {}".format(evolve_iter))
             #     _train_it(FLAGS.num_epochs_evolve)
             # logger.info("Finish evolving iteration {}".format(evolve_iter))
 
-        logger.info("Final OpsDag: {0}".format(list(enumerate(ops_pool))))
-        logger.info("Final OpsDag acc: {0}".format(list(enumerate(ops_pool_acc))))
+        logger.info("Final Ops: {0}".format(list(enumerate(ops_pool))))
+        logger.info("Final Ops acc: {0}".format(list(enumerate(ops_pool_acc))))
+        logger.info("Final Ops Dag: {0}".format(list(enumerate(ops_pool_dag))))
+
+        maxind = ops_pool_acc.index(min(ops_pool_acc))
+        logger.info("Top 10 from the best ops: {}", ops_pool[maxind])
+        for i in range(10):
+            logger.info(_eval_ops_dag(sess, ops_pool[maxind], child_ops, 
+                        generator_ops))
         return 0
 
     def _find_best_dag():
@@ -546,3 +556,94 @@ class DagController:
         #                 2, 0, 0, 0, 0, 0, 0,
         #                 0, 0, 0, 1, 0, 2, 1,
         #                 ]]
+
+    def eval_dag_arc(self, child_ops):
+        saver = tf.train.Saver(max_to_keep=2)
+        checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+          FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
+       
+        hooks = [checkpoint_saver_hook]
+        if FLAGS.child_sync_replicas:
+            sync_replicas_hook = child_ops["optimizer"].make_session_run_hook(True)
+            hooks.append(sync_replicas_hook)
+       
+        logger.info("-" * 80)
+        logger.info("Starting session")
+        config = tf.ConfigProto(allow_soft_placement=True)
+        #                         log_device_placement=True)
+        merged = tf.summary.merge_all()
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
+
+
+        # print("Variables:")
+        # for var in tf.trainable_variables():
+        #     print(var)
+        with tf.train.SingularMonitoredSession(
+          config=config) as sess:
+        # with tf.Session() as sess:
+            train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
+                                                 sess.graph)
+            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+            run_metadata = tf.RunMetadata()
+
+            start_time = time.time()
+            # train each path, get validation acc
+            # get the initial population
+            self.iteration = 0
+            self.epoch = 0
+            while True:
+                if self.iteration % 100 == 1:
+                    run_ops = [
+                            merged,
+                            child_ops["loss"],
+                            child_ops["lr"],
+                            child_ops["grad_norm"],
+                            child_ops["train_acc"],
+                            child_ops["train_op"],
+                            ]
+                    summary, loss, lr, gn, tr_acc, _ = sess.run(run_ops,
+                            options=run_options, run_metadata=run_metadata)
+                    train_writer.add_run_metadata(run_metadata,
+                                          'step{0}'.format(self.iteration))
+                    train_writer.add_summary(summary, self.iteration)
+                    logger.info("Finish t_step {0}".format(self.iteration))
+                else:
+                    run_ops = [
+                            child_ops["loss"],
+                            child_ops["lr"],
+                            child_ops["grad_norm"],
+                            child_ops["train_acc"],
+                            child_ops["train_op"],
+                            ]
+                    loss, lr, gn, tr_acc, _ = sess.run(run_ops)
+
+                global_step = sess.run(child_ops["global_step"])
+                self.iteration = global_step
+
+                if FLAGS.child_sync_replicas:
+                    actual_step = global_step * FLAGS.num_aggregate
+                else:
+                    actual_step = global_step
+                self.epoch = actual_step // child_ops["num_train_batches"]
+                curr_time = time.time()
+                if global_step % FLAGS.log_every == 0:
+                    logger.info("Global Step at {}".format(global_step))
+                    log_string = ""
+                    log_string += "epoch={:<6d}".format(self.epoch)
+                    log_string += "ch_step={:<6d}".format(global_step)
+                    log_string += " loss={:<8.6f}".format(loss)
+                    log_string += " lr={:<8.4f}".format(lr)
+                    log_string += " |g|={:<8.4f}".format(gn)
+                    log_string += " tr_acc={:<3d}/{:>3d}".format(
+                        tr_acc, FLAGS.batch_size)
+                    log_string += " mins={:<10.2f}".format(
+                        float(curr_time - start_time) / 60)
+                    logger.info(log_string)
+
+                    child_ops["eval_func"](sess, "test")
+
+                if self.epoch >= FLAGS.num_epochs:
+                    break
+            train_writer.close()
+
