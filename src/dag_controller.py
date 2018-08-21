@@ -251,6 +251,11 @@ class DagController:
                 merged,
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
+            ]
+            train_ops = [
+                merged,
+                generator_ops["sample_arc"],
+                generator_ops["entropy"],
                 generator_ops["lr"],
                 generator_ops["grad_norm"],
                 generator_ops["valid_acc"],
@@ -265,14 +270,14 @@ class DagController:
                 # generator_step = sess.run(generator_ops["train_op"], 
                 #         feed_dict=feed_dict)
                 # logger.info(generator_step)
-                summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
+                summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(train_ops, 
                                         feed_dict=feed_dict, options=run_options,
                                         run_metadata=run_metadata)
                 # train_writer.add_run_metadata(run_metadata,
                 #                       'step{0}{1}'.format(self.iteration, i))
                 # train_writer.add_summary(summary, self.iteration)
                 logger.info("Sampled Arc: ")
-                logger.info(np.reshape(arc, (self.num_cells, self.cd_length)))
+                logger.info(np.reshape(arc, (self.num_cells*2, self.cd_length)))
                 logger.info(val_acc)
                 logger.info(entropy)
                 logger.info(lr)
@@ -301,11 +306,11 @@ class DagController:
                             child_ops["reduce_arc"]: tmp_dag_reduce}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
-                    logger.info(bin(it))
-                    logger.info(tmp_dag)
-                    logger.info(tmp_dag_reduce)
-                    logger.info(valid_acc)
                     if valid_acc > best_acc:
+                        logger.info(bin(it))
+                        logger.info(tmp_dag)
+                        logger.info(tmp_dag_reduce)
+                        logger.info(valid_acc)
                         final_dag = tmp_dag
                         final_dag_reduce = tmp_dag_reduce
                         best_acc = valid_acc
@@ -462,6 +467,7 @@ class DagController:
                 valid_acc, best_dag = _eval_ops_dag(sess, cpath, 
                                                   child_ops, generator_ops)
                 logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
+                logger.info(np.reshape(best_dag, (self.num_cells*2, self.cd_length)))
                 # child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
                 # bucket_ind = _path_length(cpath)
                 # candidate_path_buckets[bucket_ind].append(cpath)
