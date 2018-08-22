@@ -11,7 +11,7 @@ python src/main.py \
   --search_for="micro" \
   --reset_output_dir \
   --data_path="data/cifar10" \
-  --output_dir="outputs" \
+  --output_dir="outputs/out" \
   --summaries_dir="elog/log" \
   --batch_size=144 \
   --num_gpus=1 \

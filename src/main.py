@@ -25,7 +25,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 logger = utils.logger
 
@@ -285,13 +285,13 @@ def train():
 def main(_):
     logger.info(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
     logger.info("-" * 80)
-    if not os.path.isdir(FLAGS.output_dir):
-        logger.info("Path {} does not exist. Creating.".format(FLAGS.output_dir))
-        os.makedirs(FLAGS.output_dir)
-    elif FLAGS.reset_output_dir:
-        logger.info("Path {} exists. Remove and remake.".format(FLAGS.output_dir))
-        shutil.rmtree(FLAGS.output_dir)
-        os.makedirs(FLAGS.output_dir)
+    # if not os.path.isdir(FLAGS.output_dir):
+    #     logger.info("Path {} does not exist. Creating.".format(FLAGS.output_dir))
+    #     os.makedirs(FLAGS.output_dir)
+    # elif FLAGS.reset_output_dir:
+    #     logger.info("Path {} exists. Remove and remake.".format(FLAGS.output_dir))
+    #     shutil.rmtree(FLAGS.output_dir)
+    #     os.makedirs(FLAGS.output_dir)
  
     # logger.info("-" * 80)
     # log_file = os.path.join(FLAGS.output_dir, "stdout")

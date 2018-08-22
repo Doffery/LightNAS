@@ -144,10 +144,12 @@ class DagController:
     def evolve_ops_dag(self, child_ops, generator_ops):
         logger.info("-" * 80)
         logger.info("Starting session")
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
         config = tf.ConfigProto(allow_soft_placement=True)
         saver = tf.train.Saver(max_to_keep=2)
         checkpoint_saver_hook = tf.train.CheckpointSaverHook(
-            FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
+            FLAGS.output_dir+time_tag, save_steps=child_ops["num_train_batches"], saver=saver)
 
         hooks = [checkpoint_saver_hook]
         if FLAGS.child_sync_replicas:
@@ -158,10 +160,8 @@ class DagController:
             hooks.append(sync_replicas_hook)
 
         merged = tf.summary.merge_all()
-        time_tag = str(int(time.time()))
-        logger.info("Summary Tag {}".format(time_tag))
         sess = tf.train.SingularMonitoredSession(config=config,
-                                hooks=hooks, checkpoint_dir=FLAGS.output_dir)
+                                hooks=hooks, checkpoint_dir=FLAGS.output_dir+time_tag)
         train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
                                              sess.graph)
         run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
@@ -287,14 +287,15 @@ class DagController:
                 pool.append(arc)
                 pool_acc.append(val_acc)
 
+
             def _merge_extensive(path_pool, path_pool_acc):
-                # try every possibility of combining 2,3 pathes
+                # try every possibility of combining 2,3,4,5 pathes
                 final_dag = self._path2dag([0 for x in range(self.num_cells)])
                 final_dag_reduce = self._path2dag([0 for x in range(self.num_cells)])
                 best_acc = 0
                 for it in range(1, 1 << self.num_cand_path):
                     path_num = bin(it).count("1") 
-                    if path_num < 2 or path_num > 3:
+                    if path_num < 2 or path_num > 5:
                         continue
                     tmp_dag = self._path2dag([0 for x in range(self.num_cells)])
                     tmp_dag_reduce = self._path2dag([0 for x in range(self.num_cells)])
@@ -302,19 +303,31 @@ class DagController:
                         if (1 << i) & it != 0:
                             tmp_dag = self._merge_dag(tmp_dag, path_pool[i][0])
                             tmp_dag_reduce = self._merge_dag(tmp_dag_reduce, path_pool[i][1])
+
+                    # check the number of ops in tmp_dag and tmp_dag_reduce
+                    # if 2 block less than self.num_cells - 4, the omit this dag
+                    def count_ops_num(ops_dag):
+                        c = 0
+                        for i in range(self.num_cells):
+                            if ops_dag[i*self.cd_length] != 2:
+                                c += 1
+                        return c
+                    if count_ops_num(tmp_dag) + count_ops_num(tmp_dag_reduce) < self.num_cells - 4:
+                        continue
+
                     feed_dict = {child_ops["dag_arc"]: tmp_dag,
                             child_ops["reduce_arc"]: tmp_dag_reduce}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
                     if valid_acc > best_acc:
                         logger.info(bin(it))
-                        logger.info(tmp_dag)
-                        logger.info(tmp_dag_reduce)
+                        logger.info(np.reshape(tmp_dag, (self.num_cells, self.cd_length)))
+                        logger.info(np.reshape(tmp_dag_reduce, (self.num_cells, self.cd_length)))
                         logger.info(valid_acc)
                         final_dag = tmp_dag
                         final_dag_reduce = tmp_dag_reduce
                         best_acc = valid_acc
-                return best_acc, final_dag
+                return best_acc, (final_dag, final_dag_reduce)
 
 
             def _merge_strategy_greedy(path_pool, path_pool_acc):
@@ -380,7 +393,7 @@ class DagController:
                 best_dag = (final_dag, final_dag_reduce)
                 return best_acc, best_dag
 
-            return _merge_strategy_greedy(pool, pool_acc)
+            return _merge_extensive(pool, pool_acc)
 
         ops_pool = self._init_ops_pool()
         ops_pool_acc = []
