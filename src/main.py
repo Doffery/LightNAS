@@ -25,7 +25,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '2,3'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 logger = utils.logger
 
@@ -183,7 +183,6 @@ def get_ops(images, labels):
         num_replicas=FLAGS.controller_num_replicas)
 
     child_model.initialize(generator_model)
-    generator_model.build_trainer(child_model)
     # controller_model.build_trainer(child_model)
 
     child_ops = {
@@ -194,7 +193,6 @@ def get_ops(images, labels):
       "grad_norm": child_model.grad_norm,
       "train_acc": child_model.train_acc,
       "optimizer": child_model.optimizer,
-      "valid_rl_acc": child_model.valid_rl_acc,
       "valid_acc": child_model.valid_acc,
       # "path_arc": child_model.path_arc,
       "dag_arc": child_model.dag_arc,
@@ -204,21 +202,26 @@ def get_ops(images, labels):
       "eval_func": child_model.eval_once,
     }
 
-    generator_ops = {
-      "train_step": generator_model.train_step,
-      "loss": generator_model.loss,
-      "train_op": generator_model.train_op,
-      "lr": generator_model.lr,
-      "grad_norm": generator_model.grad_norm,
-      "valid_acc": generator_model.valid_acc,
-      "optimizer": generator_model.optimizer,
-      "baseline": generator_model.baseline,
-      "entropy": generator_model.sample_entropy,
-      "conv_ops": generator_model.conv_ops,
-      "reduce_ops": generator_model.reduce_ops,
-      "sample_arc": generator_model.sample_arc,
-      "skip_rate": generator_model.skip_rate,
-    }
+    if FLAGS.child_fixed_arc is None:
+        generator_model.build_trainer(child_model)
+        child_ops["valid_rl_acc"] = child_model.valid_rl_acc
+        generator_ops = {
+          "train_step": generator_model.train_step,
+          "loss": generator_model.loss,
+          "train_op": generator_model.train_op,
+          "lr": generator_model.lr,
+          "grad_norm": generator_model.grad_norm,
+          "valid_acc": generator_model.valid_acc,
+          "optimizer": generator_model.optimizer,
+          "baseline": generator_model.baseline,
+          "entropy": generator_model.sample_entropy,
+          "conv_ops": generator_model.conv_ops,
+          "reduce_ops": generator_model.reduce_ops,
+          "sample_arc": generator_model.sample_arc,
+          "skip_rate": generator_model.skip_rate,
+        }
+    else:
+        generator_ops = {}
 
     ops = {
       "child": child_ops,
@@ -282,13 +285,13 @@ def train():
 def main(_):
     logger.info(time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime()))
     logger.info("-" * 80)
-    if not os.path.isdir(FLAGS.output_dir):
-        logger.info("Path {} does not exist. Creating.".format(FLAGS.output_dir))
-        os.makedirs(FLAGS.output_dir)
-    elif FLAGS.reset_output_dir:
-        logger.info("Path {} exists. Remove and remake.".format(FLAGS.output_dir))
-        shutil.rmtree(FLAGS.output_dir)
-        os.makedirs(FLAGS.output_dir)
+    # if not os.path.isdir(FLAGS.output_dir):
+    #     logger.info("Path {} does not exist. Creating.".format(FLAGS.output_dir))
+    #     os.makedirs(FLAGS.output_dir)
+    # elif FLAGS.reset_output_dir:
+    #     logger.info("Path {} exists. Remove and remake.".format(FLAGS.output_dir))
+    #     shutil.rmtree(FLAGS.output_dir)
+    #     os.makedirs(FLAGS.output_dir)
  
     # logger.info("-" * 80)
     # log_file = os.path.join(FLAGS.output_dir, "stdout")

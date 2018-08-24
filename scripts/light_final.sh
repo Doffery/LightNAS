@@ -3,18 +3,18 @@
 
 export PYTHONPATH="$(pwd)"
 
-fixed_arc="1 0 0 0 0 0 0 0 3 0 1 1 0 0 0 0 0 0 5 0 0 1 1 0 0 0 0 0 1 0 0 0 1 1 0 0 0 0 5 0 0 0 0 0 1 0 0 0 2 0 0 0 1 0 0 1 0 0 5 0 0 0 0 0 0 1 1 0 5 1 0 0 0 0 0 0 1 1 2 1"
-fixed_arc="$fixed_arc 1 0 0 0 0 0 0 0 3 0 1 1 0 0 0 0 0 0 2 0 0 1 1 0 0 0 0 0 5 0 0 0 0 1 0 0 0 0 4 0 0 0 0 0 1 0 0 0 2 0 0 0 0 0 0 1 0 0 4 0 0 0 0 0 0 1 1 0 3 1 0 0 0 0 0 0 0 1 2 1"
+fixed_arc="1 0 0 0 0 0 1 2 0 0 0 0 0 0 1 0 0 0 0 1 0 0 1 0 0 0 2 1 0 0 0 1 0 3 1"
+fixed_arc="$fixed_arc 1 0 0 0 0 2 1 1 1 0 0 0 3 1 0 1 0 0 0 4 0 0 0 0 1 0 4 0 0 0 1 0 1 2 1"
 # --data_format="NCHW" \
 python src/main.py \
   --data_format="NHWC" \
   --search_for="micro" \
   --reset_output_dir \
   --data_path="data/cifar10" \
-  --output_dir="outputs" \
+  --output_dir="outputs/out" \
   --summaries_dir="elog/log" \
   --batch_size=144 \
-  --num_gpus=0 \
+  --num_gpus=1 \
   --num_cpus=10 \
   --num_epochs=200 \
   --path_pool_size=1 \
@@ -27,7 +27,7 @@ python src/main.py \
   --child_out_filters=36 \
   --child_l2_reg=2e-4 \
   --child_num_branches=5 \
-  --child_num_cells=8 \
+  --child_num_cells=5 \
   --child_keep_prob=0.80 \
   --child_drop_path_keep_prob=0.60 \
   --child_lr_cosine \

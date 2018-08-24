@@ -144,6 +144,8 @@ class DagController:
     def evolve_ops_dag(self, child_ops, generator_ops):
         logger.info("-" * 80)
         logger.info("Starting session")
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
         config = tf.ConfigProto(allow_soft_placement=True)
         # saver = tf.train.Saver(max_to_keep=2)
         # checkpoint_saver_hook = tf.train.CheckpointSaverHook(
@@ -159,8 +161,6 @@ class DagController:
             hooks.append(sync_replicas_hook)
 
         merged = tf.summary.merge_all()
-        time_tag = str(int(time.time()))
-        logger.info("Summary Tag {}".format(time_tag))
         sess = tf.train.SingularMonitoredSession(config=config,
                                 hooks=hooks)  # , checkpoint_dir=FLAGS.output_dir)
         train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
@@ -252,6 +252,11 @@ class DagController:
                 merged,
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
+            ]
+            train_ops = [
+                merged,
+                generator_ops["sample_arc"],
+                generator_ops["entropy"],
                 generator_ops["lr"],
                 generator_ops["grad_norm"],
                 generator_ops["valid_acc"],
@@ -266,7 +271,7 @@ class DagController:
                 # generator_step = sess.run(generator_ops["train_op"], 
                 #         feed_dict=feed_dict)
                 # logger.info(generator_step)
-                summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(run_ops, 
+                summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(train_ops, 
                                         feed_dict=feed_dict, options=run_options,
                                         run_metadata=run_metadata)
                 # train_writer.add_run_metadata(run_metadata,
@@ -283,14 +288,15 @@ class DagController:
                 pool.append(arc)
                 pool_acc.append(val_acc)
 
+
             def _merge_extensive(path_pool, path_pool_acc):
-                # try every possibility of combining 2,3 pathes
+                # try every possibility of combining 2,3,4,5 pathes
                 final_dag = self._path2dag([0 for x in range(self.num_cells)])
                 final_dag_reduce = self._path2dag([0 for x in range(self.num_cells)])
                 best_acc = 0
                 for it in range(1, 1 << self.num_cand_path):
                     path_num = bin(it).count("1") 
-                    if path_num < 2 or path_num > 3:
+                    if path_num < 2 or path_num > 5:
                         continue
                     tmp_dag = self._path2dag([0 for x in range(self.num_cells)])
                     tmp_dag_reduce = self._path2dag([0 for x in range(self.num_cells)])
@@ -298,17 +304,27 @@ class DagController:
                         if (1 << i) & it != 0:
                             tmp_dag = self._merge_dag(tmp_dag, path_pool[i][0])
                             tmp_dag_reduce = self._merge_dag(tmp_dag_reduce, path_pool[i][1])
+
+                    # check the number of ops in tmp_dag and tmp_dag_reduce
+                    # if 2 block less than self.num_cells - 4, the omit this dag
+                    def count_ops_num(ops_dag):
+                        c = 0
+                        for i in range(self.num_cells):
+                            if ops_dag[i*self.cd_length] != 2:
+                                c += 1
+                        return c
+                    if count_ops_num(tmp_dag) + count_ops_num(tmp_dag_reduce) < self.num_cells - 4:
+                        continue
+
                     feed_dict = {child_ops["dag_arc"]: tmp_dag,
                             child_ops["reduce_arc"]: tmp_dag_reduce}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
-                    logger.info(bin(it))
-                    logger.info(np.reshape(tmp_dag,
-                                           (self.num_cells, self.cd_length)))
-                    logger.info(np.reshape(tmp_dag_reduce,
-                                           (self.num_cells, self.cd_length)))
-                    logger.info(valid_acc)
                     if valid_acc > best_acc:
+                        logger.info(bin(it))
+                        logger.info(np.reshape(tmp_dag, (self.num_cells, self.cd_length)))
+                        logger.info(np.reshape(tmp_dag_reduce, (self.num_cells, self.cd_length)))
+                        logger.info(valid_acc)
                         final_dag = tmp_dag
                         final_dag_reduce = tmp_dag_reduce
                         best_acc = valid_acc
@@ -382,6 +398,7 @@ class DagController:
 
         ops_pool = self._init_ops_pool()
         ops_pool_acc = []
+        ops_pool_dag = []
         init_dags = []
         for op in ops_pool:
             best_acc, best_dag = _eval_ops_dag(sess, op, child_ops, generator_ops)
@@ -465,6 +482,7 @@ class DagController:
                 valid_acc, best_dag = _eval_ops_dag(sess, cpath, 
                                                   child_ops, generator_ops)
                 logger.info('Candidate {0} acc: {1}'.format(i, valid_acc))
+                logger.info(np.reshape(best_dag, (self.num_cells*2, self.cd_length)))
                 # child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
                 # bucket_ind = _path_length(cpath)
                 # candidate_path_buckets[bucket_ind].append(cpath)
@@ -507,24 +525,33 @@ class DagController:
             # It means train after selection here
             # _train_it(0.5, train_cand_set)
             ops_pool_acc = []
-            init_dags = []
+            init_dags.clear()
             for op in ops_pool:
                 best_acc, best_dag = _eval_ops_dag(sess, op, child_ops, generator_ops)
                 # ops_pool_acc.append(best_acc)
                 init_dags.append(best_dag)
             _train_it(0.5, init_dags)
+            ops_pool_dag.clear()
             for op in ops_pool:
                 best_acc, best_dag = _eval_ops_dag(sess, op, child_ops, generator_ops)
                 ops_pool_acc.append(best_acc)
                 # init_dags.append(best_dag)
+                ops_pool_dag.append(best_dag)
 
             # if evolve_iter % FLAGS.train_every_generations == 0:
             #     logger.info("Train evolving iteration {}".format(evolve_iter))
             #     _train_it(FLAGS.num_epochs_evolve)
             # logger.info("Finish evolving iteration {}".format(evolve_iter))
 
-        logger.info("Final OpsDag: {0}".format(list(enumerate(ops_pool))))
-        logger.info("Final OpsDag acc: {0}".format(list(enumerate(ops_pool_acc))))
+        logger.info("Final Ops: {0}".format(list(enumerate(ops_pool))))
+        logger.info("Final Ops acc: {0}".format(list(enumerate(ops_pool_acc))))
+        logger.info("Final Ops Dag: {0}".format(list(enumerate(ops_pool_dag))))
+
+        maxind = ops_pool_acc.index(min(ops_pool_acc))
+        logger.info("Top 10 from the best ops: {}", ops_pool[maxind])
+        for i in range(10):
+            logger.info(_eval_ops_dag(sess, ops_pool[maxind], child_ops, 
+                        generator_ops))
         return 0
 
     def _find_best_dag():
@@ -543,3 +570,94 @@ class DagController:
         #                 2, 0, 0, 0, 0, 0, 0,
         #                 0, 0, 0, 1, 0, 2, 1,
         #                 ]]
+
+    def eval_dag_arc(self, child_ops):
+        saver = tf.train.Saver(max_to_keep=2)
+        checkpoint_saver_hook = tf.train.CheckpointSaverHook(
+          FLAGS.output_dir, save_steps=child_ops["num_train_batches"], saver=saver)
+       
+        hooks = [checkpoint_saver_hook]
+        if FLAGS.child_sync_replicas:
+            sync_replicas_hook = child_ops["optimizer"].make_session_run_hook(True)
+            hooks.append(sync_replicas_hook)
+       
+        logger.info("-" * 80)
+        logger.info("Starting session")
+        config = tf.ConfigProto(allow_soft_placement=True)
+        #                         log_device_placement=True)
+        merged = tf.summary.merge_all()
+        time_tag = str(int(time.time()))
+        logger.info("Summary Tag {}".format(time_tag))
+
+
+        # print("Variables:")
+        # for var in tf.trainable_variables():
+        #     print(var)
+        with tf.train.SingularMonitoredSession(
+          config=config) as sess:
+        # with tf.Session() as sess:
+            train_writer = tf.summary.FileWriter(FLAGS.summaries_dir+time_tag,
+                                                 sess.graph)
+            run_options = tf.RunOptions(trace_level=tf.RunOptions.FULL_TRACE)
+            run_metadata = tf.RunMetadata()
+
+            start_time = time.time()
+            # train each path, get validation acc
+            # get the initial population
+            self.iteration = 0
+            self.epoch = 0
+            while True:
+                if self.iteration % 100 == 1:
+                    run_ops = [
+                            merged,
+                            child_ops["loss"],
+                            child_ops["lr"],
+                            child_ops["grad_norm"],
+                            child_ops["train_acc"],
+                            child_ops["train_op"],
+                            ]
+                    summary, loss, lr, gn, tr_acc, _ = sess.run(run_ops,
+                            options=run_options, run_metadata=run_metadata)
+                    train_writer.add_run_metadata(run_metadata,
+                                          'step{0}'.format(self.iteration))
+                    train_writer.add_summary(summary, self.iteration)
+                    logger.info("Finish t_step {0}".format(self.iteration))
+                else:
+                    run_ops = [
+                            child_ops["loss"],
+                            child_ops["lr"],
+                            child_ops["grad_norm"],
+                            child_ops["train_acc"],
+                            child_ops["train_op"],
+                            ]
+                    loss, lr, gn, tr_acc, _ = sess.run(run_ops)
+
+                global_step = sess.run(child_ops["global_step"])
+                self.iteration = global_step
+
+                if FLAGS.child_sync_replicas:
+                    actual_step = global_step * FLAGS.num_aggregate
+                else:
+                    actual_step = global_step
+                self.epoch = actual_step // child_ops["num_train_batches"]
+                curr_time = time.time()
+                if global_step % FLAGS.log_every == 0:
+                    logger.info("Global Step at {}".format(global_step))
+                    log_string = ""
+                    log_string += "epoch={:<6d}".format(self.epoch)
+                    log_string += "ch_step={:<6d}".format(global_step)
+                    log_string += " loss={:<8.6f}".format(loss)
+                    log_string += " lr={:<8.4f}".format(lr)
+                    log_string += " |g|={:<8.4f}".format(gn)
+                    log_string += " tr_acc={:<3d}/{:>3d}".format(
+                        tr_acc, FLAGS.batch_size)
+                    log_string += " mins={:<10.2f}".format(
+                        float(curr_time - start_time) / 60)
+                    logger.info(log_string)
+
+                    child_ops["eval_func"](sess, "test")
+
+                if self.epoch >= FLAGS.num_epochs:
+                    break
+            train_writer.close()
+
