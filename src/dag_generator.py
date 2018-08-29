@@ -4,6 +4,7 @@ import utils
 
 from utils import get_train_ops
 from common_ops import stack_lstm
+from common_ops import blstm
 logger = utils.logger
 
 # This class manages the RNN to generate paths 
@@ -13,9 +14,11 @@ class DagGenerator():
     def __init__(self,
                  num_branches=4,
                  num_cells=6,
+                 num_rand_head=3,
                  lstm_size=32,
                  lstm_num_layers=1, # one layer is enough?
                  lstm_keep_prob=1.0,
+                 batch_size=8,
                  tanh_constant=None,
                  op_tanh_reduce=1.0,
                  temperature=None,
@@ -39,12 +42,13 @@ class DagGenerator():
 
         # self.search_for = search_for
         # self.search_whole_channels = search_whole_channels
-        self.num_cells = num_cells
+        self.num_cells = num_cells + num_rand_head
         self.num_branches = num_branches
 
         self.lstm_size = lstm_size
         self.lstm_num_layers = lstm_num_layers 
         self.lstm_keep_prob = lstm_keep_prob
+        self.batch_size = batch_size
         self.tanh_constant = tanh_constant
         self.op_tanh_reduce = op_tanh_reduce
         self.temperature = temperature
@@ -66,14 +70,16 @@ class DagGenerator():
         self.name = name
 
         self._create_params()
-        self.conv_ops = tf.placeholder(tf.int32, shape=(self.num_cells))
-        self.reduce_ops = tf.placeholder(tf.int32, shape=(self.num_cells))
-        arc_seq_1, entropy_1, log_prob_1, c, h = self._build_sampler(self.conv_ops, use_bias=True)
+        self.conv_ops = tf.placeholder(tf.int32, shape=(self.batch_size, self.num_cells))
+        self.reduce_ops = tf.placeholder(tf.int32, shape=(self.batch_size, self.num_cells))
+        arc_seq_1, entropy_1, log_prob_1, c, h = self._build_sampler(self.conv_ops)
         arc_seq_2, entropy_2, log_prob_2, _, _ = self._build_sampler(self.reduce_ops, prev_c=c, prev_h=h)
-        self.sample_arc = (self._to_dag(arc_seq_1, self.conv_ops), 
-                           self._to_dag(arc_seq_2, self.reduce_ops))
-        self.sample_entropy = entropy_1 + entropy_2
-        self.sample_log_prob = log_prob_1 + log_prob_2
+        # sample_arc = (self._to_dag(arc_seq_1, self.conv_ops), 
+        #                    self._to_dag(arc_seq_2, self.reduce_ops))
+        # self.arcs.append(sample_arc)
+        self.sample_arc = (arc_seq_1, arc_seq_2)
+        self.entropies = entropy_1 + entropy_2
+        self.log_probs = log_prob_1 + log_prob_2
 
     def _to_dag(self, path, ops):
         ops = tf.multiply(ops, path)
@@ -143,11 +149,12 @@ class DagGenerator():
         logger.info("-" * 80)
         logger.info("Build controller sampler")
 
-        arc_seq = tf.TensorArray(tf.int32, size=self.num_cells * 1)  # 4
+        arc_seq = tf.TensorArray(tf.int32, size=self.num_cells*self.batch_size)  # 4
+        # arc_seq = tf.reshape(arc_seq, [self.batch_size, self.num_cells])
         if prev_c is None:
             assert prev_h is None, "prev_c and prev_h must both be None"
-            prev_c = [tf.zeros([1, self.lstm_size], tf.float32)]
-            prev_h = [tf.zeros([1, self.lstm_size], tf.float32)]
+            prev_c = tf.zeros([self.batch_size, 1, self.lstm_size], tf.float32)
+            prev_h = tf.zeros([self.batch_size, 1, self.lstm_size], tf.float32)
         # inputs = self.g_emb
 
         '''
@@ -166,28 +173,31 @@ class DagGenerator():
         def _body(layer_id, inputs, prev_c, prev_h, arc_seq,
                   entropy, log_prob):
             start_id = 1 * (layer_id)  # - 2
-            inp = tf.nn.embedding_lookup(self.w_emb, [inputs[layer_id]])
+            inp = tf.nn.embedding_lookup(self.w_emb, inputs[:, layer_id])
             # for i in range(1):    # index, choose with attention or only softmax?
-            next_c, next_h = stack_lstm(inp, prev_c, prev_h, self.w_lstm)
+            logger.info(prev_h)
+            next_c, next_h = blstm(inp, prev_c, prev_h, self.w_lstm[0], self.batch_size)
+            # next_c, next_h = stack_lstm(inp, prev_c, prev_h, self.w_lstm)
             prev_c, prev_h = next_c, next_h
-            logits = tf.matmul(next_h[-1], self.w_soft) + self.b_soft
-            if self.temperature is not None:
-                logits /= self.temperature
-            if self.tanh_constant is not None:
-                op_tanh = self.tanh_constant / self.op_tanh_reduce
-                logits = op_tanh * tf.tanh(logits)
-            if use_bias:
-                logits += self.b_soft_no_learn
-            op_id = tf.multinomial(logits, 1)
-            op_id = tf.to_int32(op_id)
-            op_id = tf.reshape(op_id, [1])
-            arc_seq = arc_seq.write(start_id, op_id)
-            curr_log_prob = tf.nn.sparse_softmax_cross_entropy_with_logits(
-                logits=logits, labels=op_id)
-            log_prob += curr_log_prob
-            curr_ent = tf.stop_gradient(tf.nn.softmax_cross_entropy_with_logits(
-                logits=logits, labels=tf.nn.softmax(logits)))
-            entropy += curr_ent
+            for i in range(self.batch_size):
+                logits = tf.matmul(next_h[i], self.w_soft) + self.b_soft
+                if self.temperature is not None:
+                    logits /= self.temperature
+                if self.tanh_constant is not None:
+                    op_tanh = self.tanh_constant / self.op_tanh_reduce
+                    logits = op_tanh * tf.tanh(logits)
+                if use_bias:
+                    logits += self.b_soft_no_learn
+                op_id = tf.multinomial(logits, 1)
+                op_id = tf.to_int32(op_id)
+                op_id = tf.reshape(op_id, [1])
+                arc_seq = arc_seq.write(i*self.num_cells+start_id, op_id)
+                curr_log_prob = tf.nn.sparse_softmax_cross_entropy_with_logits(
+                    logits=logits, labels=op_id)
+                log_prob += curr_log_prob*tf.one_hot(i, self.batch_size, dtype=tf.float32)
+                curr_ent = tf.stop_gradient(tf.nn.softmax_cross_entropy_with_logits(
+                    logits=logits, labels=tf.nn.softmax(logits)))
+                entropy += curr_ent*tf.one_hot(i, self.batch_size, dtype=tf.float32)
 
             return (layer_id + 1, inputs, next_c, next_h,
                     arc_seq, entropy, log_prob)
@@ -198,8 +208,8 @@ class DagGenerator():
             prev_c,
             prev_h,
             arc_seq,
-            tf.constant([0.0], dtype=tf.float32, name="entropy"),
-            tf.constant([0.0], dtype=tf.float32, name="log_prob"),
+            tf.zeros([self.batch_size], dtype=tf.float32, name="entropy"),
+            tf.zeros([self.batch_size], dtype=tf.float32, name="log_prob"),
         ]
         
         loop_outputs = tf.while_loop(_condition, _body, loop_vars,
@@ -207,8 +217,10 @@ class DagGenerator():
 
         arc_seq = loop_outputs[-3].stack()
         arc_seq = tf.reshape(arc_seq, [-1])
-        entropy = tf.reduce_sum(loop_outputs[-2])
-        log_prob = tf.reduce_sum(loop_outputs[-1])
+        entropy = loop_outputs[-2] ###
+        log_prob = loop_outputs[-1]
+        # entropy = tf.reduce_sum(loop_outputs[-2]) ###
+        # log_prob = tf.reduce_sum(loop_outputs[-1])
 
         last_c = loop_outputs[-5]
         last_h = loop_outputs[-4]
@@ -220,17 +232,18 @@ class DagGenerator():
 
     def build_trainer(self, child_model):
         child_model.build_valid_rl()
-        self.valid_acc = (tf.to_float(child_model.valid_shuffle_acc) /
-                                            tf.to_float(child_model.batch_size))
-        self.reward = self.valid_acc  # tf.placeholder(tf.float32, shape=(1))
+        # self.valid_acc = (tf.to_float(child_model.valid_shuffle_acc) /
+        #                                     tf.to_float(child_model.batch_size))
+        # self.reward = self.valid_acc  # tf.placeholder(tf.float32, shape=(1))
+        self.reward = tf.placeholder(tf.float32, shape=(self.batch_size))
         self.reward = tf.Print(self.reward, [self.reward, 'Reward: '],
                                message="Debug: ", summarize=100)
 
         if self.entropy_weight is not None:
-            self.reward += self.entropy_weight * self.sample_entropy
+            self.reward += self.entropy_weight * self.entropies
 
-        self.sample_log_prob = tf.reduce_sum(self.sample_log_prob)
-        self.baseline = tf.Variable(0.0, dtype=tf.float32, trainable=False)
+        self.sample_log_prob = self.log_probs
+        self.baseline = tf.Variable([0.0 for i in range(self.batch_size)], trainable=False)
         baseline_update = tf.assign_sub(
             self.baseline, (1 - self.bl_dec) * (self.baseline - self.reward))
 
@@ -238,6 +251,7 @@ class DagGenerator():
             self.reward = tf.identity(self.reward)
 
         self.loss = self.sample_log_prob * (self.reward - self.baseline)
+        self.loss = tf.reduce_sum(self.loss)
         self.train_step = tf.Variable(0, dtype=tf.int32, trainable=False, name="train_step")
 
         tf_variables = [var for var in tf.trainable_variables() if var.name.startswith(self.name)]

@@ -97,10 +97,12 @@ DEFINE_boolean("controller_use_critic", False, "")
 
 DEFINE_integer("cd_length", 7, "cell_descriptor_length")
 # DEFINE_integer("opt_num", 4, "num of ops can be selected")
+DEFINE_integer("num_rand_head", 3, "num of rand heads to add randomness")
 DEFINE_integer("path_pool_size", 10, "")
 DEFINE_integer("k_init_selection_num", 2, "")
 DEFINE_integer("k_best_selection_num", 2, "")
 DEFINE_integer("max_generation", 50, "")
+DEFINE_integer("lstm_batch_size", 8, "")
 
 DEFINE_integer("train_every_generations", 5, "train again after n generations")
 DEFINE_integer("log_every", 50, "How many steps to log")
@@ -163,10 +165,12 @@ def get_ops(images, labels):
 
     generator_model = DagGenerator(
         num_cells=FLAGS.child_num_cells,
+        num_rand_head=FLAGS.num_rand_head,
         num_branches=FLAGS.child_num_branches,
         lstm_size=32,
         lstm_num_layers=1,
         lstm_keep_prob=1.0,
+        batch_size=FLAGS.lstm_batch_size,
         tanh_constant=FLAGS.controller_tanh_constant,
         op_tanh_reduce=FLAGS.controller_op_tanh_reduce,
         temperature=FLAGS.controller_temperature,
@@ -211,10 +215,10 @@ def get_ops(images, labels):
           "train_op": generator_model.train_op,
           "lr": generator_model.lr,
           "grad_norm": generator_model.grad_norm,
-          "valid_acc": generator_model.valid_acc,
+          "reward": generator_model.reward,
           "optimizer": generator_model.optimizer,
           "baseline": generator_model.baseline,
-          "entropy": generator_model.sample_entropy,
+          "entropy": generator_model.entropies,
           "conv_ops": generator_model.conv_ops,
           "reduce_ops": generator_model.reduce_ops,
           "sample_arc": generator_model.sample_arc,
@@ -252,9 +256,11 @@ def train():
 
         dc = DagController(
                 num_cells=FLAGS.child_num_cells,
+                num_rand_head=FLAGS.num_rand_head,
                 num_layers=FLAGS.child_num_layers,
                 cd_length=FLAGS.child_num_cells+2,
                 opt_num=FLAGS.child_num_branches,
+                num_cand_path=FLAGS.lstm_batch_size,
                 path_pool_size=FLAGS.path_pool_size,
                 k_init_selection_num=FLAGS.k_init_selection_num,
                 k_best_selection_num=FLAGS.k_best_selection_num,

@@ -13,6 +13,23 @@ def lstm(x, prev_c, prev_h, w):
     next_h = o * tf.tanh(next_c)
     return next_c, next_h
 
+def blstm(x, prev_c, prev_h, w, batch_size):
+    nclist = []
+    nhlist = []
+    for ib in range(batch_size):
+        sx = tf.slice(x, [ib, 0], [1, x.get_shape()[1]])
+        ifog = tf.matmul(tf.concat([sx, prev_h[ib]], axis=1), w)
+        i, f, o, g = tf.split(ifog, 4, axis=1)
+        i = tf.sigmoid(i)
+        f = tf.sigmoid(f)
+        o = tf.sigmoid(o)
+        g = tf.tanh(g)
+        next_c = i * g + f * prev_c[ib]
+        next_h = o * tf.tanh(next_c)
+        nclist.append(next_c)
+        nhlist.append(next_h)
+    return tf.stack(nclist), tf.stack(nhlist)
+    # return next_c, next_h
 
 def stack_lstm(x, prev_c, prev_h, w):
     next_c, next_h = [], []

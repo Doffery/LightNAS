@@ -22,9 +22,11 @@ logger = utils.logger
 class DagController:
     def __init__(self,
                  num_cells,
+                 num_rand_head,
                  num_layers,
                  cd_length,
                  opt_num,
+                 num_cand_path,
                  path_pool_size,
                  k_init_selection_num,
                  k_best_selection_num,
@@ -32,12 +34,14 @@ class DagController:
         logger.info("*" * 80)
         logger.info('Start building controller')
         self.num_cells = num_cells
+        self.num_rand_head = num_rand_head
         self.num_cells_double = num_cells * 2
         self.num_layers = num_layers
         self.cd_length = cd_length
         self.cd_opt_ind = self.cd_length-2
         self.cd_end_ind = self.cd_length-1
         self.opt_num = opt_num
+        self.num_cand_path = num_cand_path
         self.path_pool_size = path_pool_size
         self.max_generation = max_generation
         self.k_init_selection = k_init_selection_num
@@ -245,47 +249,53 @@ class DagController:
 
         def _eval_ops_dag(sess, ops_dag, child_ops, generator_ops):
             logger.info("Start evaluating {}".format(ops_dag))
-            feed_dict = {generator_ops["conv_ops"]: ops_dag[:self.num_cells],
-                         generator_ops["reduce_ops"]: ops_dag[self.num_cells:]}
+            c_ops_batch = []
+            r_ops_batch = []
+            assert(self.num_cand_path < self.opt_num ** 2)
+            for i in range(self.num_cand_path):
+                _rh = [i/self.opt_num, i % self.opt_num] + 1
+                c_ops_batch.append(np.concatenate([_rh, ops_dag[:self.num_cells]]))
+                r_ops_batch.append(np.concatenate([_rh, ops_dag[self.num_cells:]]))
+            feed_dict = {generator_ops["conv_ops"]: c_ops_batch,
+                         generator_ops["reduce_ops"]: r_ops_batch}
             run_ops = [
-                merged,
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
             ]
+            arc, entropy = sess.run(train_ops, feed_dict=feed_dict)
+            logger.info("Sampled Arc: ")
+            for i in range(self.num_cand_path):
+                logger.info(arc[0][i][self.num_rand_head:]*ops_dag[:self.num_cells],
+                        arc[1][i][self.num_rand_head:]*ops_dag[self.num_cells:])
             train_ops = [
                 merged,
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
                 generator_ops["lr"],
                 generator_ops["grad_norm"],
-                generator_ops["valid_acc"],
+                generator_ops["reward"],
                 generator_ops["baseline"],
                 generator_ops["skip_rate"],
                 generator_ops["train_op"],
             ]
             pool = []
             pool_acc = []
-            self.num_cand_path = 8
-            for i in range(self.num_cand_path):
-                # generator_step = sess.run(generator_ops["train_op"], 
-                #         feed_dict=feed_dict)
-                # logger.info(generator_step)
-                summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(train_ops, 
-                                        feed_dict=feed_dict, options=run_options,
-                                        run_metadata=run_metadata)
-                # train_writer.add_run_metadata(run_metadata,
-                #                       'step{0}{1}'.format(self.iteration, i))
-                # train_writer.add_summary(summary, self.iteration)
-                logger.info("Sampled Arc: ")
-                logger.info(np.reshape(arc, (self.num_cells*2, self.cd_length)))
-                logger.info(val_acc)
-                logger.info(entropy)
-                logger.info(lr)
-                logger.info(gn)
-                logger.info(bl)
-                logger.info(skip)
-                pool.append(arc)
-                pool_acc.append(val_acc)
+            summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(train_ops, 
+                                    feed_dict=feed_dict, options=run_options,
+                                    run_metadata=run_metadata)
+            # train_writer.add_run_metadata(run_metadata,
+            #                       'step{0}{1}'.format(self.iteration, i))
+            # train_writer.add_summary(summary, self.iteration)
+            logger.info("Sampled Arc: ")
+            logger.info(np.reshape(arc, (self.num_cells*2, self.cd_length)))
+            logger.info(val_acc)
+            logger.info(entropy)
+            logger.info(lr)
+            logger.info(gn)
+            logger.info(bl)
+            logger.info(skip)
+            pool.append(arc)
+            pool_acc.append(val_acc)
 
 
             def _merge_extensive(path_pool, path_pool_acc):
