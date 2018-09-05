@@ -265,57 +265,39 @@ class DagController:
             arc, entropy = sess.run(run_ops, feed_dict=feed_dict)
             arc = np.reshape(arc, (2, self.num_cand_path, self.num_rand_head+self.num_cells))
             logger.info("Sampled Arc: ")
+            logger.info(arc)
             pool = []
             pool_acc = []
             for i in range(self.num_cand_path):
-                logger.info((arc[0][i][self.num_rand_head:]*ops_dag[:self.num_cells],
-                             arc[1][i][self.num_rand_head:]*ops_dag[self.num_cells:]))
-            train_ops = [
-                merged,
-                generator_ops["sample_arc"],
-                generator_ops["entropy"],
-                generator_ops["lr"],
-                generator_ops["grad_norm"],
-                generator_ops["baseline"],
-                generator_ops["skip_rate"],
-                generator_ops["train_op"],
-            ]
-            feed_dict = {generator_ops["conv_ops"]: c_ops_batch,
-                         generator_ops["reduce_ops"]: r_ops_batch,
-                         generator_ops["reward"]: reward_acc}
-            summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(train_ops, 
-                                    feed_dict=feed_dict, options=run_options,
-                                    run_metadata=run_metadata)
-            # train_writer.add_run_metadata(run_metadata,
-            #                       'step{0}{1}'.format(self.iteration, i))
-            # train_writer.add_summary(summary, self.iteration)
-            logger.info("Sampled Arc: ")
-            logger.info(np.reshape(arc, (self.num_cells*2, self.cd_length)))
-            logger.info(val_acc)
-            logger.info(entropy)
-            logger.info(lr)
-            logger.info(gn)
-            logger.info(bl)
-            logger.info(skip)
-            pool.append(arc)
-            pool_acc.append(val_acc)
+                conv_arc = self._path2dag(arc[0][i][self.num_rand_head:]*ops_dag[:self.num_cells])
+                reduce_arc = self._path2dag(arc[1][i][self.num_rand_head:]*ops_dag[self.num_cells:])
+                pool.append((conv_arc, reduce_arc))
 
-
-            def _merge_extensive(path_pool, path_pool_acc):
-                # try every possibility of combining 2,3,4,5 pathes
+            def _merge_extensive(path_pool):
+                # try every possibility of combining 3,4,5 pathes
                 final_dag = self._path2dag([0 for x in range(self.num_cells)])
                 final_dag_reduce = self._path2dag([0 for x in range(self.num_cells)])
                 best_acc = 0
+                check_dict = {}
+                acc_list = [[] for i in range(len(path_pool))]
+                emp_dag = self._path2dag([0 for x in range(self.num_cells)])
                 for it in range(1, 1 << self.num_cand_path):
                     path_num = bin(it).count("1") 
-                    if path_num < 2 or path_num > 5:
+                    if path_num < 3 or path_num > 5:
                         continue
-                    tmp_dag = self._path2dag([0 for x in range(self.num_cells)])
-                    tmp_dag_reduce = self._path2dag([0 for x in range(self.num_cells)])
+                    tmp_dag = emp_dag
+                    tmp_dag_reduce = emp_dag
+                    inds = []
                     for i in range(self.num_cand_path):
                         if (1 << i) & it != 0:
-                            tmp_dag = self._merge_dag(tmp_dag, path_pool[i][0])
-                            tmp_dag_reduce = self._merge_dag(tmp_dag_reduce, path_pool[i][1])
+                            inds.append(i)
+                            if (tmp_dag, i, 0) not in check_dict:
+                                check_dict[(tmp_dag, i, 0)] = self._merge_dag(tmp_dag, path_pool[i][0])
+                            tmp_dag = check_dict[(tmp_dag, i, 0)]
+                            if (tmp_dag_reduce, i, 1) not in check_dict:
+                                check_dict[(tmp_dag_reduce, i, 1)] = self._merge_dag(
+                                        tmp_dag_reduce, path_pool[i][1])
+                            tmp_dag_reduce = check_dict[(tmp_dag_reduce, i, 1)]
 
                     # check the number of ops in tmp_dag and tmp_dag_reduce
                     # if 2 block less than self.num_cells - 4, the omit this dag
@@ -325,13 +307,15 @@ class DagController:
                             if ops_dag[i*self.cd_length] != 2:
                                 c += 1
                         return c
-                    if count_ops_num(tmp_dag) + count_ops_num(tmp_dag_reduce) < self.num_cells - 4:
+                    if count_ops_num(tmp_dag) + count_ops_num(tmp_dag_reduce) < self.num_cells - 6:
                         continue
 
                     feed_dict = {child_ops["dag_arc"]: tmp_dag,
                             child_ops["reduce_arc"]: tmp_dag_reduce}
                     valid_acc = sess.run(child_ops["valid_rl_acc"],
                                          feed_dict=feed_dict)
+                    for ind in inds:
+                        acc_list[ind].append(valid_acc)
                     if valid_acc > best_acc:
                         logger.info(bin(it))
                         logger.info(np.reshape(tmp_dag, (self.num_cells, self.cd_length)))
@@ -340,7 +324,15 @@ class DagController:
                         final_dag = tmp_dag
                         final_dag_reduce = tmp_dag_reduce
                         best_acc = valid_acc
-                return best_acc, (final_dag, final_dag_reduce)
+                avg_reward_acc = []
+                logger.info("acc_list:")
+                logger.info(acc_list)
+                for i in range(len(path_pool)):
+                    if acc_list[i] == []:
+                        avg_reward_acc.append(0.0) # or avg or something???
+                    else:
+                        avg_reward_acc.append(sum(acc_list[i])/len(acc_list[i]))
+                return best_acc, (final_dag, final_dag_reduce), avg_reward_acc
 
 
             def _merge_strategy_greedy(path_pool, path_pool_acc):
@@ -406,7 +398,35 @@ class DagController:
                 best_dag = (final_dag, final_dag_reduce)
                 return best_acc, best_dag
 
-            return _merge_extensive(pool, pool_acc)
+            best_acc, best_dag, reward_acc = _merge_extensive(pool, pool_acc)
+            train_ops = [
+                merged,
+                generator_ops["sample_arc"],
+                generator_ops["entropy"],
+                generator_ops["lr"],
+                generator_ops["grad_norm"],
+                generator_ops["baseline"],
+                generator_ops["skip_rate"],
+                generator_ops["train_op"],
+            ]
+            feed_dict = {generator_ops["conv_ops"]: c_ops_batch,
+                         generator_ops["reduce_ops"]: r_ops_batch,
+                         generator_ops["reward"]: reward_acc}
+            summary, arc, entropy, lr, gn, bl, skip, _ = sess.run(train_ops, 
+                                    feed_dict=feed_dict, options=run_options,
+                                    run_metadata=run_metadata)
+            # train_writer.add_run_metadata(run_metadata,
+            #                       'step{0}{1}'.format(self.iteration, i))
+            # train_writer.add_summary(summary, self.iteration)
+            logger.info("Sampled Arc: ")
+            logger.info(arc)
+            logger.info(entropy)
+            logger.info(lr)
+            logger.info(gn)
+            logger.info(bl)
+            logger.info(skip)
+
+            return best_acc, best_dag
 
         ops_pool = self._init_ops_pool()
         ops_pool_acc = []
