@@ -251,35 +251,38 @@ class DagController:
             logger.info("Start evaluating {}".format(ops_dag))
             c_ops_batch = []
             r_ops_batch = []
-            assert(self.num_cand_path < self.opt_num ** 2)
+            assert(self.num_cand_path < self.opt_num ** self.num_rand_head)
             for i in range(self.num_cand_path):
-                _rh = [i/self.opt_num, i % self.opt_num] + 1
-                c_ops_batch.append(np.concatenate([_rh, ops_dag[:self.num_cells]]))
-                r_ops_batch.append(np.concatenate([_rh, ops_dag[self.num_cells:]]))
+                _rh = np.array([i/self.opt_num, i % self.opt_num])
+                c_ops_batch.append(np.concatenate([_rh, ops_dag[:self.num_cells]-1]))
+                r_ops_batch.append(np.concatenate([_rh, ops_dag[self.num_cells:]-1]))
             feed_dict = {generator_ops["conv_ops"]: c_ops_batch,
                          generator_ops["reduce_ops"]: r_ops_batch}
             run_ops = [
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
             ]
-            arc, entropy = sess.run(train_ops, feed_dict=feed_dict)
+            arc, entropy = sess.run(run_ops, feed_dict=feed_dict)
+            arc = np.reshape(arc, (2, self.num_cand_path, self.num_rand_head+self.num_cells))
             logger.info("Sampled Arc: ")
+            pool = []
+            pool_acc = []
             for i in range(self.num_cand_path):
-                logger.info(arc[0][i][self.num_rand_head:]*ops_dag[:self.num_cells],
-                        arc[1][i][self.num_rand_head:]*ops_dag[self.num_cells:])
+                logger.info((arc[0][i][self.num_rand_head:]*ops_dag[:self.num_cells],
+                             arc[1][i][self.num_rand_head:]*ops_dag[self.num_cells:]))
             train_ops = [
                 merged,
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
                 generator_ops["lr"],
                 generator_ops["grad_norm"],
-                generator_ops["reward"],
                 generator_ops["baseline"],
                 generator_ops["skip_rate"],
                 generator_ops["train_op"],
             ]
-            pool = []
-            pool_acc = []
+            feed_dict = {generator_ops["conv_ops"]: c_ops_batch,
+                         generator_ops["reduce_ops"]: r_ops_batch,
+                         generator_ops["reward"]: reward_acc}
             summary, arc, entropy, lr, gn, val_acc, bl, skip, _ = sess.run(train_ops, 
                                     feed_dict=feed_dict, options=run_options,
                                     run_metadata=run_metadata)
@@ -447,7 +450,7 @@ class DagController:
             # apply mutation
             for ind in seeds:
                 for i in range(self.num_cells_double):
-                    for j in range(1, self.opt_num):
+                    for j in range(1, self.opt_num+1):
                         tmp_path = np.copy(ops_pool[ind])
                         # tmp = tmp_path[i]
                         tmp_path[i] = j  # np.random.randint(0, self.opt_num+1)

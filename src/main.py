@@ -97,7 +97,7 @@ DEFINE_boolean("controller_use_critic", False, "")
 
 DEFINE_integer("cd_length", 7, "cell_descriptor_length")
 # DEFINE_integer("opt_num", 4, "num of ops can be selected")
-DEFINE_integer("num_rand_head", 3, "num of rand heads to add randomness")
+DEFINE_integer("num_rand_head", 2, "num of rand heads to add randomness")
 DEFINE_integer("path_pool_size", 10, "")
 DEFINE_integer("k_init_selection_num", 2, "")
 DEFINE_integer("k_best_selection_num", 2, "")
