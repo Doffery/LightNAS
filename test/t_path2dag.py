@@ -16,10 +16,10 @@ def _path2dag(path):
                 dag[pre_op_idx*(num_cells+2)-1] = 0
             dag[start_idx+num_cells+1] = 1
             pre_op_idx = i+1
-    # return dag.reshape((num_cells, num_cells+2))
-    return dag
+    return dag.reshape((num_cells, num_cells+2))
+    # return dag
 
-print(_path2dag([2,0,3,1,0]))
+print(_path2dag([0,0,0,0,0]))
 
 def _merge_dag(da, db):
     d2a = np.reshape(da, (num_cells, (num_cells+2)))

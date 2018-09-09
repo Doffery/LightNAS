@@ -1036,7 +1036,7 @@ class DagExecutor(Model):
             self.valid_acc = tf.to_int32(self.valid_acc)
             self.valid_acc = tf.reduce_sum(self.valid_acc)
 
-            tf.summary.scalar('validation acc', self.valid_acc)
+            # tf.summary.scalar('validation acc', self.valid_acc)
 
     # override
     def _build_test(self):
@@ -1049,7 +1049,7 @@ class DagExecutor(Model):
         self.test_acc = tf.to_int32(self.test_acc)
         self.test_acc = tf.reduce_sum(self.test_acc)
 
-        tf.summary.scalar('test acc', self.test_acc)
+        # tf.summary.scalar('test acc', self.test_acc)
 
     # override
     def build_valid_rl(self, shuffle=False):
@@ -1095,7 +1095,11 @@ class DagExecutor(Model):
 
     def initialize(self, generator_model):
         if self.fixed_arc is None:
-            self.dag_arc, self.reduce_arc = generator_model.sample_arc
+            # self.dag_arc, self.reduce_arc = generator_model.sample_arc
+            self.dag_arc = tf.placeholder(tf.int32, shape=(
+                                          self.num_cells*self.cd_length))
+            self.reduce_arc = tf.placeholder(tf.int32, shape=(
+                                          self.num_cells*(self.cd_length)))
         else:
             fixed_arc = np.array([int(x) for x in self.fixed_arc.split(" ") if x])
             self.dag_arc = fixed_arc[:self.cd_length * self.num_cells]

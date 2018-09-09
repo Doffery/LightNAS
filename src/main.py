@@ -25,7 +25,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 
 logger = utils.logger
 
@@ -215,7 +215,7 @@ def get_ops(images, labels):
           "train_op": generator_model.train_op,
           "lr": generator_model.lr,
           "grad_norm": generator_model.grad_norm,
-          "reward": generator_model.reward,
+          "reward": generator_model.reward_data,
           "optimizer": generator_model.optimizer,
           "baseline": generator_model.baseline,
           "entropy": generator_model.entropies,

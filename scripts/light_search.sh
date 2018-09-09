@@ -9,7 +9,7 @@ python src/main.py \
   --data_path="data/cifar10" \
   --output_dir="outputs/out" \
   --summaries_dir="log/log" \
-  --batch_size=160 \
+  --batch_size=128 \
   --num_gpus=1 \
   --path_pool_size=20 \
   --num_epochs=3 \

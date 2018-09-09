@@ -3,8 +3,8 @@
 
 export PYTHONPATH="$(pwd)"
 
-fixed_arc="1 0 0 0 0 0 1 2 0 0 0 0 0 0 1 0 0 0 0 1 0 0 1 0 0 0 2 1 0 0 0 1 0 3 1"
-fixed_arc="$fixed_arc 1 0 0 0 0 2 1 1 1 0 0 0 3 1 0 1 0 0 0 4 0 0 0 0 1 0 4 0 0 0 1 0 1 2 1"
+fixed_arc="1 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 2 0 2 0 0 0 0 0 0 0 0 0 0 1 1 0 0 0 0 0 3 0 0 0 0 0 1 0 0 0 3 0 0 0 0 0 0 1 0 0 4 1 0 0 0 0 0 1 1 0 3 1 0 0 0 0 0 0 0 1 1 1"
+fixed_arc="$fixed_arc 1 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 2 0 0 1 1 0 0 0 0 0 4 0 2 0 0 0 0 0 0 0 0 0 0 0 0 1 0 0 0 0 1 0 0 0 1 1 0 0 0 0 2 0 0 0 0 0 0 1 1 0 1 1 0 0 0 0 0 0 1 1 3 1"
 # --data_format="NCHW" \
 python src/main.py \
   --data_format="NHWC" \
@@ -13,7 +13,7 @@ python src/main.py \
   --data_path="data/cifar10" \
   --output_dir="outputs/out" \
   --summaries_dir="elog/log" \
-  --batch_size=144 \
+  --batch_size=128 \
   --num_gpus=1 \
   --num_cpus=10 \
   --num_epochs=200 \
@@ -23,11 +23,11 @@ python src/main.py \
   --eval_every_epochs=1 \
   --child_fixed_arc="${fixed_arc}" \
   --child_use_aux_heads \
-  --child_num_layers=15 \
+  --child_num_layers=30 \
   --child_out_filters=36 \
   --child_l2_reg=2e-4 \
   --child_num_branches=5 \
-  --child_num_cells=5 \
+  --child_num_cells=8 \
   --child_keep_prob=0.80 \
   --child_drop_path_keep_prob=0.60 \
   --child_lr_cosine \

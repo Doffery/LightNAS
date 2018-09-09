@@ -235,9 +235,8 @@ class DagGenerator():
         # self.valid_acc = (tf.to_float(child_model.valid_shuffle_acc) /
         #                                     tf.to_float(child_model.batch_size))
         # self.reward = self.valid_acc  # tf.placeholder(tf.float32, shape=(1))
-        self.reward = tf.placeholder(tf.float32, shape=(self.batch_size))
-        self.reward = tf.Print(self.reward, [self.reward, 'Reward: '],
-                               message="Debug: ", summarize=100)
+        self.reward_data = tf.placeholder(tf.float32, shape=(self.batch_size))
+        self.reward = self.reward_data
 
         if self.entropy_weight is not None:
             self.reward += self.entropy_weight * self.entropies

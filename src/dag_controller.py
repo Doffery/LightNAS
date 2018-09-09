@@ -81,6 +81,9 @@ class DagController:
                     dag[(pre_op_idx+1)*self.cd_length-1] = 0
                 dag[start_idx+end_ind] = 1
                 pre_op_idx = i
+        if sum(path) == 0:
+            dag[0] = 1
+            dag[self.cd_end_ind] = 1
         # logger.info(path)
         # logger.info(np.reshape(dag, (self.num_cells, self.cd_length)))
         return dag
@@ -291,13 +294,16 @@ class DagController:
                     for i in range(self.num_cand_path):
                         if (1 << i) & it != 0:
                             inds.append(i)
-                            if (tmp_dag, i, 0) not in check_dict:
-                                check_dict[(tmp_dag, i, 0)] = self._merge_dag(tmp_dag, path_pool[i][0])
-                            tmp_dag = check_dict[(tmp_dag, i, 0)]
-                            if (tmp_dag_reduce, i, 1) not in check_dict:
-                                check_dict[(tmp_dag_reduce, i, 1)] = self._merge_dag(
+                            tmp_dag = self._merge_dag(tmp_dag, path_pool[i][0])
+                            tmp_dag_reduce = self._merge_dag(
                                         tmp_dag_reduce, path_pool[i][1])
-                            tmp_dag_reduce = check_dict[(tmp_dag_reduce, i, 1)]
+                            # if (tmp_dag, i, 0) not in check_dict:
+                            #     check_dict[(tmp_dag, i, 0)] = self._merge_dag(tmp_dag, path_pool[i][0])
+                            # tmp_dag = check_dict[(tmp_dag, i, 0)]
+                            # if (tmp_dag_reduce, i, 1) not in check_dict:
+                            #     check_dict[(tmp_dag_reduce, i, 1)] = self._merge_dag(
+                            #             tmp_dag_reduce, path_pool[i][1])
+                            # tmp_dag_reduce = check_dict[(tmp_dag_reduce, i, 1)]
 
                     # check the number of ops in tmp_dag and tmp_dag_reduce
                     # if 2 block less than self.num_cells - 4, the omit this dag
@@ -398,9 +404,9 @@ class DagController:
                 best_dag = (final_dag, final_dag_reduce)
                 return best_acc, best_dag
 
-            best_acc, best_dag, reward_acc = _merge_extensive(pool, pool_acc)
+            best_acc, best_dag, reward_acc = _merge_extensive(pool)
             train_ops = [
-                merged,
+                # merged,
                 generator_ops["sample_arc"],
                 generator_ops["entropy"],
                 generator_ops["lr"],
@@ -412,9 +418,9 @@ class DagController:
             feed_dict = {generator_ops["conv_ops"]: c_ops_batch,
                          generator_ops["reduce_ops"]: r_ops_batch,
                          generator_ops["reward"]: reward_acc}
-            summary, arc, entropy, lr, gn, bl, skip, _ = sess.run(train_ops, 
-                                    feed_dict=feed_dict, options=run_options,
-                                    run_metadata=run_metadata)
+            arc, entropy, lr, gn, bl, skip, _ = sess.run(train_ops, 
+                                    feed_dict=feed_dict)#, options=run_options,
+            #                         run_metadata=run_metadata)
             # train_writer.add_run_metadata(run_metadata,
             #                       'step{0}{1}'.format(self.iteration, i))
             # train_writer.add_summary(summary, self.iteration)
