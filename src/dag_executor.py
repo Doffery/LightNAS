@@ -821,33 +821,35 @@ class DagExecutor(Model):
         at_least_one_end = tf.Assert(tf.greater(num_outs, 0), 
                                      [num_outs, indices])  # at least one
 
-        inp = prev_layer
-        if self.data_format == "NHWC":
-            N = tf.shape(inp)[0]
-            H = tf.shape(inp)[1]
-            W = tf.shape(inp)[2]
-            C = tf.shape(inp)[3]
-            out = tf.transpose(out, [1, 2, 3, 0, 4])
-            out = tf.reshape(out, [N, H, W, num_outs * out_filters])
-        elif self.data_format == "NCHW":
-            N = tf.shape(inp)[0]
-            C = tf.shape(inp)[1]
-            H = tf.shape(inp)[2]
-            W = tf.shape(inp)[3]
-            out = tf.transpose(out, [1, 0, 2, 3, 4])
-            out = tf.reshape(out, [N, num_outs * out_filters, H, W])
-        else:
-            raise ValueError("Unknown data_format '{0}'".format(self.data_format))
-
         with tf.control_dependencies([at_least_one_end]):
-            with tf.variable_scope("final_conv"):
-                w = create_weight("w", [possible_end_length, out_filters * out_filters])
-                w = tf.gather(w, indices, axis=0)
-                w = tf.reshape(w, [1, 1, num_outs * out_filters, out_filters])
-                out = tf.nn.relu(out)
-                out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
-                                   data_format=self.data_format)
-                out = batch_norm(out, is_training=True, data_format=self.data_format)
+            out = tf.reduce_mean(out, 0)
+        # inp = prev_layer
+        # if self.data_format == "NHWC":
+        #     N = tf.shape(inp)[0]
+        #     H = tf.shape(inp)[1]
+        #     W = tf.shape(inp)[2]
+        #     C = tf.shape(inp)[3]
+        #     out = tf.transpose(out, [1, 2, 3, 0, 4])
+        #     out = tf.reshape(out, [N, H, W, num_outs * out_filters])
+        # elif self.data_format == "NCHW":
+        #     N = tf.shape(inp)[0]
+        #     C = tf.shape(inp)[1]
+        #     H = tf.shape(inp)[2]
+        #     W = tf.shape(inp)[3]
+        #     out = tf.transpose(out, [1, 0, 2, 3, 4])
+        #     out = tf.reshape(out, [N, num_outs * out_filters, H, W])
+        # else:
+        #     raise ValueError("Unknown data_format '{0}'".format(self.data_format))
+
+        # with tf.control_dependencies([at_least_one_end]):
+        #     with tf.variable_scope("final_conv"):
+        #         w = create_weight("w", [possible_end_length, out_filters * out_filters])
+        #         w = tf.gather(w, indices, axis=0)
+        #         w = tf.reshape(w, [1, 1, num_outs * out_filters, out_filters])
+        #         out = tf.nn.relu(out)
+        #         out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
+        #                            data_format=self.data_format)
+        #         out = batch_norm(out, is_training=True, data_format=self.data_format)
 
         # out = tf.reshape(out, tf.shape(prev_layers[0]))
         out = tf.reshape(out, tf.shape(prev_layer))
