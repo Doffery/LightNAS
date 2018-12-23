@@ -3,8 +3,8 @@
 
 export PYTHONPATH="$(pwd)"
 
-fixed_arc="1 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 2 0 2 0 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 3 0 0 0 1 0 1 0 0 0 4 0 0 0 0 0 1 1 0 0 4 1 0 0 0 0 1 0 1 0 3 1 0 0 0 0 0 0 1 1 1 1"
-fixed_arc="$fixed_arc 1 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 2 0 0 1 0 0 0 0 0 0 4 0 1 0 1 0 0 0 0 0 4 0 0 0 0 1 0 0 0 0 2 0 0 0 0 0 1 1 0 0 2 1 0 0 1 0 1 0 1 0 2 1 2 0 0 0 0 0 0 0 0 0"
+fixed_arc="1 0 0 0 0 0 0 0 0 1 0 1 0 0 0 0 0 0 2 0 0 0 1 0 0 0 0 0 3 0 1 0 1 0 0 0 0 0 3 0 0 0 0 1 1 0 0 0 4 0 0 0 0 0 0 1 0 0 4 1 0 0 0 0 1 0 1 0 3 1 2 0 0 0 0 0 0 0 0 0"
+fixed_arc="$fixed_arc 1 0 0 0 0 0 0 0 0 1 1 1 0 0 0 0 0 0 1 0 0 0 1 0 0 0 0 0 3 0 1 0 0 1 0 0 0 0 4 0 0 0 0 0 1 0 0 0 2 0 0 0 0 1 1 0 0 0 1 1 0 0 0 0 0 1 0 0 2 0 0 0 0 0 0 0 0 1 2 1"
 # --data_format="NCHW" \
 python src/main.py \
   --data_format="NHWC" \
@@ -23,20 +23,18 @@ python src/main.py \
   --eval_every_epochs=1 \
   --child_fixed_arc="${fixed_arc}" \
   --child_use_aux_heads \
-  --child_num_layers=30 \
+  --child_num_layers=27 \
   --child_out_filters=20 \
   --child_l2_reg=1e-4 \
   --child_num_branches=5 \
   --child_num_cells=8 \
   --child_keep_prob=0.80 \
   --child_drop_path_keep_prob=0.60 \
-  --child_lr=0.05 \
-  --child_lr_max=0.01 \
-  --child_lr_min=0.00005 \
+  --child_lr_cosine \
+  --child_lr_max=0.05 \
+  --child_lr_min=0.0005 \
   --child_lr_T_0=10 \
   --child_lr_T_mul=2 \
-  --child_lr_dec_every=1 \
-  --child_lr_dec_rate=0.95 \
   --controller_training \
   --controller_search_whole_channels \
   --controller_entropy_weight=0.0001 \

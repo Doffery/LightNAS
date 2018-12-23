@@ -489,24 +489,30 @@ class DagExecutor(Model):
                     else:
                         x = layer
                     out.append(x)
+            logger.info(out)
 
-            if self.data_format == "NHWC":
-                out = tf.concat(out, axis=3)
-            elif self.data_format == "NCHW":
-                out = tf.concat(out, axis=1)
-            else:
-                raise ValueError("Unknown data_format '{0}'".format(self.data_format))
+            # if self.data_format == "NHWC":
+            #     out = tf.concat(out, axis=3)
+            # elif self.data_format == "NCHW":
+            #     out = tf.concat(out, axis=1)
+            # else:
+            #     raise ValueError("Unknown data_format '{0}'".format(self.data_format))
+            # logger.info(out)
+
+        out = tf.stack(out, axis=0)
 
         with tf.control_dependencies([at_least_one_end]):
-            with tf.variable_scope("final_conv"):
-                w = create_weight("w", [possible_end_length, out_filters * out_filters])
-                w = w[:num_ends]
-                # w = tf.gather(w, indices, axis=0)
-                w = tf.reshape(w, [1, 1, num_ends * out_filters, out_filters])
-                out = tf.nn.relu(out)
-                out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
-                                   data_format=self.data_format)
-                out = batch_norm(out, is_training=True, data_format=self.data_format)
+            out = tf.reduce_mean(out, 0)
+            logger.info(out)
+            # with tf.variable_scope("final_conv"):
+            #     w = create_weight("w", [possible_end_length, out_filters * out_filters])
+            #     w = w[:num_ends]
+            #     # w = tf.gather(w, indices, axis=0)
+            #     w = tf.reshape(w, [1, 1, num_ends * out_filters, out_filters])
+            #     out = tf.nn.relu(out)
+            #     out = tf.nn.conv2d(out, w, strides=[1, 1, 1, 1], padding="SAME",
+            #                        data_format=self.data_format)
+            #     out = batch_norm(out, is_training=True, data_format=self.data_format)
 
         # out = tf.reshape(out, tf.shape(prev_layers[0]))
         out = tf.reshape(out, tf.shape(layers[0]))
@@ -989,6 +995,9 @@ class DagExecutor(Model):
                 self.train_acc = tf.equal(self.train_preds, self.y_train)
                 self.train_acc = tf.to_int32(self.train_acc)
                 self.train_acc = tf.reduce_sum(self.train_acc)
+
+                tf.summary.scalar('train acc', self.train_acc)
+
                 tf_variables = [
                     var for var in tf.trainable_variables() if (
                         var.name.startswith(self.name) and "aux_head" not in var.name)]
@@ -1038,7 +1047,7 @@ class DagExecutor(Model):
             self.valid_acc = tf.to_int32(self.valid_acc)
             self.valid_acc = tf.reduce_sum(self.valid_acc)
 
-            # tf.summary.scalar('validation acc', self.valid_acc)
+            tf.summary.scalar('validation acc', self.valid_acc)
 
     # override
     def _build_test(self):
@@ -1051,7 +1060,7 @@ class DagExecutor(Model):
         self.test_acc = tf.to_int32(self.test_acc)
         self.test_acc = tf.reduce_sum(self.test_acc)
 
-        # tf.summary.scalar('test acc', self.test_acc)
+        tf.summary.scalar('test acc', self.test_acc)
 
     # override
     def build_valid_rl(self, shuffle=False):

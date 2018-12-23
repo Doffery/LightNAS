@@ -30,13 +30,11 @@ python src/main.py \
   --child_num_cells=8 \
   --child_keep_prob=0.80 \
   --child_drop_path_keep_prob=0.60 \
-  --child_lr=0.05 \
+  --child_lr_cosine \
   --child_lr_max=0.01 \
   --child_lr_min=0.00005 \
   --child_lr_T_0=10 \
   --child_lr_T_mul=2 \
-  --child_lr_dec_every=1 \
-  --child_lr_dec_rate=0.95 \
   --controller_training \
   --controller_search_whole_channels \
   --controller_entropy_weight=0.0001 \

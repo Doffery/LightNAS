@@ -251,6 +251,9 @@ class DagGenerator():
 
         self.loss = self.sample_log_prob * (self.reward - self.baseline)
         self.loss = tf.reduce_sum(self.loss)
+
+        tf.summary.scalar('rl loss', self.loss)
+
         self.train_step = tf.Variable(0, dtype=tf.int32, trainable=False, name="train_step")
 
         tf_variables = [var for var in tf.trainable_variables() if var.name.startswith(self.name)]

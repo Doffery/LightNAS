@@ -193,7 +193,7 @@ class DagController:
                 for i in range(len(train_pool)):
                     feed_dict = {child_ops["dag_arc"]: train_pool[i][0],
                                  child_ops["reduce_arc"]: train_pool[i][1]}
-                    if self.iteration % 100 == 1:
+                    if self.iteration % FLAGS.log_every == 1:
                         run_ops = [
                                 merged,
                                 child_ops["loss"],
@@ -237,8 +237,8 @@ class DagController:
                         log_string += " loss={:<8.6f}".format(loss)
                         log_string += " lr={:<8.4f}".format(lr)
                         log_string += " |g|={:<8.4f}".format(gn)
-                        log_string += " tr_acc={:<3d}/{:>3d}".format(
-                            tr_acc, FLAGS.batch_size)
+                        log_string += " tr_acc={:<3d}/{:>3d}={}".format(
+                            tr_acc, FLAGS.batch_size, float(tr_acc)/FLAGS.batch_size)
                         log_string += " mins={:<10.2f}".format(
                             float(curr_time - start_time) / 60)
                         logger.info(log_string)
@@ -318,7 +318,7 @@ class DagController:
 
                     feed_dict = {child_ops["dag_arc"]: tmp_dag,
                             child_ops["reduce_arc"]: tmp_dag_reduce}
-                    valid_acc = sess.run(child_ops["valid_rl_acc"],
+                    valid_acc = sess.run(child_ops["valid_rl_acc"],  # is it right to choose this?
                                          feed_dict=feed_dict)
                     for ind in inds:
                         acc_list[ind].append(valid_acc)
@@ -575,6 +575,9 @@ class DagController:
                 ops_pool_acc.append(best_acc)
                 # init_dags.append(best_dag)
                 ops_pool_dag.append(best_dag)
+                feed_dict = {child_ops["dag_arc"]: best_dag[0],
+                             child_ops["reduce_arc"]: best_dag[1]}
+                child_ops["eval_func"](sess, "test", feed_dict=feed_dict)
 
             # if evolve_iter % FLAGS.train_every_generations == 0:
             #     logger.info("Train evolving iteration {}".format(evolve_iter))
@@ -645,7 +648,7 @@ class DagController:
             self.iteration = 0
             self.epoch = 0
             while True:
-                if self.iteration % 100 == 1:
+                if self.iteration % FLAGS.log_every == 1:
                     run_ops = [
                             merged,
                             child_ops["loss"],
@@ -687,8 +690,8 @@ class DagController:
                     log_string += " loss={:<8.6f}".format(loss)
                     log_string += " lr={:<8.4f}".format(lr)
                     log_string += " |g|={:<8.4f}".format(gn)
-                    log_string += " tr_acc={:<3d}/{:>3d}".format(
-                        tr_acc, FLAGS.batch_size)
+                    log_string += " tr_acc={:<3d}/{:>3d}={}".format(
+                        tr_acc, FLAGS.batch_size, float(tr_acc)/FLAGS.batch_size)
                     log_string += " mins={:<10.2f}".format(
                         float(curr_time - start_time) / 60)
                     logger.info(log_string)

@@ -25,7 +25,7 @@ from data_utils import read_data
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 logger = utils.logger
 
@@ -150,14 +150,14 @@ def get_ops(images, labels):
       clip_mode="norm",
       grad_bound=FLAGS.child_grad_bound,
       lr_init=FLAGS.child_lr,
-      lr_dec_every=FLAGS.child_lr_dec_every,
+      lr_dec_every=FLAGS.child_lr_dec_every, #epoch as mete
       lr_dec_rate=FLAGS.child_lr_dec_rate,
       lr_cosine=FLAGS.child_lr_cosine,
       lr_max=FLAGS.child_lr_max,
       lr_min=FLAGS.child_lr_min,
       lr_T_0=FLAGS.child_lr_T_0,
       lr_T_mul=FLAGS.child_lr_T_mul,
-      optim_algo="momentum",
+      optim_algo="adam",
       sync_replicas=FLAGS.child_sync_replicas,
       num_aggregate=FLAGS.child_num_aggregate,
       num_replicas=FLAGS.child_num_replicas,
