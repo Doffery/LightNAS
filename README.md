@@ -1,4 +1,5 @@
 Aim to build a light and fast version of Neural Network Archetecture Search solution. (Failed)
+Refer to _Efficient Neural Architecture Search via Parameter Sharing. Google_
 
 Basic idea:
 We try to build the NN from a dag. The node is layer. The edge is the flow of
